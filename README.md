@@ -29,7 +29,7 @@ The steps run in the order listed below.
    - Enables **RPM Fusion (Free & Non-Free)** repositories.
    - Enables the **Terra Repository** (maintained by Fyra Labs).
    - Configures the official repositories for **Visual Studio Code**, **Google Chrome**, and the **Google Cloud CLI** (architecture-aware via `$basearch`).
-   - Enables the **CachyOS COPR** repository for sched-ext and the **jdtls** COPR for the Java language server.
+   - Enables the **CachyOS COPR** repository for sched-ext.
    - Disables unused, limited third-party repositories (**NVIDIA** and **Steam** subsets) to prevent DNF metadata bloat on AMD hardware.
 5. **Multimedia Swap & Video Acceleration**:
    - Swaps out Fedora's restricted `ffmpeg-free` for full `ffmpeg` from RPM Fusion.
@@ -37,8 +37,7 @@ The steps run in the order listed below.
    - Installs hardware-accelerated video decoding drivers (`mesa-va-drivers-freeworld` and `intel-media-driver`).
 6. **Consolidated Package Installation**: Installs all application, runtime, and development packages in a **single DNF transaction**:
    - **Applications**: VLC, GNOME Boxes, Google Chrome, Visual Studio Code, LibreOffice.
-   - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Go, Node.js, Java OpenJDK, and the Fedora **Development Tools** group.
-   - **Language servers**: jdtls (Java).
+   - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Go, Node.js, and the Fedora **Development Tools** group.
    - **Container tools**: Distrobox.
    - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, hdparm, plus archive support (`unrar`, `p7zip`, `p7zip-plugins`).
 7. **General Linux & Storage Optimizations**:

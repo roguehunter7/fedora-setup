@@ -132,8 +132,6 @@ EOF
 
 echo "--> Enabling CachyOS COPR repository for sched-ext..."
 dnf copr enable -y bieszczaders/kernel-cachyos-addons
-echo "--> Enabling jdtls (Eclipse JDT Language Server) COPR..."
-dnf copr enable -y karlinator/jdtls || true
 
 # Disable unused workstation repositories if file exists
 WORKSTATION_REPOS="/etc/yum.repos.d/fedora-workstation-repositories.repo"
@@ -160,9 +158,9 @@ dnf install -y \
   @development-tools \
   vlc gnome-boxes gstreamer1-plugins-ugly gstreamer1-plugins-bad-freeworld gstreamer1-libav lame-libs \
   code google-chrome-stable google-cloud-cli libxcrypt-compat \
-  golang nodejs python3 python3-pip python3-devel java-latest-openjdk distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
+  golang nodejs python3 python3-pip python3-devel distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
-  scx-scheds scx-tools jdtls flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm unrar p7zip p7zip-plugins \
+  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm unrar p7zip p7zip-plugins \
   libreoffice google-carlito-fonts google-crosextra-caladea-fonts || true
 
 
