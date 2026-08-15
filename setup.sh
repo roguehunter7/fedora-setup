@@ -149,7 +149,7 @@ dnf install -y \
   @development-tools \
   vlc gnome-boxes gstreamer1-plugins-ugly gstreamer1-plugins-bad-freeworld gstreamer1-libav lame-libs \
   code google-chrome-stable google-cloud-cli libxcrypt-compat \
-  golang nodejs python3 python3-pip python3-devel distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
+  nodejs python3 python3-pip python3-devel distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
   scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver unrar p7zip p7zip-plugins \
   libreoffice google-carlito-fonts google-crosextra-caladea-fonts
@@ -346,19 +346,8 @@ echo "--> Rebuilding font cache..."
 fc-cache -f || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
-# DEV TOOLCHAINS & LANGUAGE SERVERS
+# NODE.JS TOOLCHAIN
 # ==============================================================================
-if [ "$TARGET_USER" != "root" ]; then
-    echo "--> Installing Rust via rustup..."
-    sudo -u "$TARGET_USER" bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-
-    echo "--> Installing rust-analyzer..."
-    sudo -u "$TARGET_USER" "$TARGET_HOME/.cargo/bin/rustup" component add rust-analyzer || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-
-    echo "--> Installing gopls (Go language server)..."
-    sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" go install golang.org/x/tools/gopls@latest || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-fi
-
 echo "--> Installing TypeScript, its language server, and Reasonix CLI..."
 npm install -g typescript typescript-language-server reasonix || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
@@ -382,8 +371,8 @@ eval "$(starship init zsh)"
 source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
-# Ensure local bin and toolchain binaries are in PATH
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/go/bin:$PATH"
+# Ensure local bin is in PATH
+export PATH="$HOME/.local/bin:$PATH"
 
 # Sane Zsh options
 setopt HIST_IGNORE_DUPS

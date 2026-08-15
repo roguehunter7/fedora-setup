@@ -37,7 +37,7 @@ The steps run in the order listed below.
    - Installs hardware-accelerated video decoding drivers (`mesa-va-drivers-freeworld` and `intel-media-driver`).
 6. **Consolidated Package Installation**: Installs all application, runtime, and development packages in a **single DNF transaction**:
    - **Applications**: VLC, GNOME Boxes, Google Chrome, Visual Studio Code, LibreOffice.
-   - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Go, Node.js, and the Fedora **Development Tools** group.
+   - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Node.js, and the Fedora **Development Tools** group.
    - **Container tools**: Distrobox.
    - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, plus archive support (`unrar`, `p7zip`, `p7zip-plugins`).
 7. **General Linux & Storage Optimizations**:
@@ -61,14 +61,12 @@ The steps run in the order listed below.
     - Installs the **Microsoft TrueType Core Fonts** installer, plus metric-compatible **Carlito** and **Caladea** fonts.
     - Rebuilds the system font cache.
 13. **Dev Toolchains & Language Servers**:
-    - **Rust** via the official `rustup` installer, plus the **rust-analyzer** language server.
-    - **gopls** (Go language server) via `go install`.
     - **TypeScript** and the **TypeScript language server** via npm.
     - **Reasonix** (terminal coding agent) via npm.
 14. **Usability & Shell Customization (Zsh)**:
     - Installs **Zsh** and the official plugins **zsh-syntax-highlighting** and **zsh-autosuggestions**.
     - Sets the default shell to **Zsh**.
-    - Configures `~/.zshrc` to initialize the **Starship** prompt and put toolchain binaries (`~/.cargo/bin`, `~/go/bin`, `~/.local/bin`) on `PATH`.
+    - Configures `~/.zshrc` to initialize the **Starship** prompt and put local binaries (`~/.local/bin`) on `PATH`.
     - Enables **Sudo Password Feedback** (shows asterisks as you type passwords).
 15. **DNS**: Enables `systemd-resolved` with Cloudflare **1.1.1.1 / 1.0.0.1**, falling back to Google **8.8.8.8**, with **DNS over TLS** — run last so the network restart cannot interrupt earlier steps.
 
