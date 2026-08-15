@@ -67,9 +67,6 @@ configure_dnf_speedups "/etc/dnf5/dnf.conf"
 # ==============================================================================
 echo "--> Uninstalling Firefox..."
 dnf remove -y 'firefox*' || true
-
-
-
 echo "--> Upgrading all system packages..."
 dnf upgrade -y
 
@@ -146,16 +143,6 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc
 enabled=1
 EOF
 
-# Brave Browser repository
-cat <<EOF > /etc/yum.repos.d/brave-browser.repo
-[brave-browser]
-name=Brave Browser
-baseurl=https://brave-browser-rpm-release.s3.brave.com/\$basearch/
-gpgcheck=1
-gpgkey=https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
-enabled=1
-EOF
-
 # Google Chrome repository
 cat <<EOF > /etc/yum.repos.d/google-chrome.repo
 [google-chrome]
@@ -204,7 +191,7 @@ echo "--> Installing all applications, runtimes, development tools, and dependen
 dnf install -y \
   @development-tools \
   vlc gnome-boxes gstreamer1-plugins-ugly gstreamer1-plugins-bad-freeworld gstreamer1-libav lame-libs \
-  code brave-browser google-chrome-stable google-cloud-cli libxcrypt-compat \
+  code google-chrome-stable google-cloud-cli libxcrypt-compat \
   golang nodejs python3 python3-pip python3-devel java-latest-openjdk distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
   scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm \

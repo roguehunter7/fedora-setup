@@ -21,12 +21,12 @@ This single command fetches the setup script directly and executes it with root 
 ## What this Script Does
 
 1. **DNF Speed Optimizations**: Configures `max_parallel_downloads=20` and `defaultyes=True` for both DNF and DNF5 to make package updates much faster.
-2. **App Cleanup (Removal)**: Uninstalls the default **Firefox** browser (Brave is the preferred browser).
+2. **App Cleanup (Removal)**: Uninstalls the default **Firefox** browser (Chrome is the preferred browser).
 3. **System-wide Package Upgrade**: Upgrades all pre-installed system packages to their latest versions.
 4. **Repository Configuration**:
    - Enables **RPM Fusion (Free & Non-Free)** repositories.
    - Enables the **Terra Repository** (maintained by Fyra Labs).
-   - Configures the official repositories for **Visual Studio Code**, **Brave Browser**, **Google Chrome**, and the **Google Cloud CLI** (architecture-aware via `$basearch`).
+   - Configures the official repositories for **Visual Studio Code**, **Google Chrome**, and the **Google Cloud CLI** (architecture-aware via `$basearch`).
    - Enables the **CachyOS COPR** repository for sched-ext.
    - Disables unused, limited third-party repositories (**NVIDIA** and **Steam** subsets) to prevent DNF metadata bloat on AMD hardware.
 5. **General Linux & Storage Optimizations**:
@@ -45,7 +45,7 @@ This single command fetches the setup script directly and executes it with root 
    - Installs the `@multimedia` package group.
    - Installs hardware-accelerated video decoding drivers (`mesa-va-drivers-freeworld` and `intel-media-driver`).
 8. **Consolidated Package Installation**: Installs all application, runtime, and development packages in a **single DNF transaction**:
-   - **Applications**: VLC, GNOME Boxes, Google Chrome, Brave Browser, Visual Studio Code, LibreOffice.
+   - **Applications**: VLC, GNOME Boxes, Google Chrome, Visual Studio Code, LibreOffice.
    - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Go, Node.js, Java OpenJDK, and the Fedora **Development Tools** group.
    - **Container tools**: Distrobox.
    - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, hdparm.
