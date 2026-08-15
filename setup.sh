@@ -8,6 +8,7 @@
 
 {
 set -euo pipefail
+FAILURES=0
 
 # Ensure script is run as root
 if [ "$(id -u)" -ne 0 ]; then
@@ -56,16 +57,16 @@ configure_dnf_speedups "/etc/dnf5/dnf.conf"
 # REMOVE UNWANTED DEFAULT APPLICATIONS
 # ==============================================================================
 echo "--> Uninstalling Firefox..."
-dnf remove -y 'firefox*' || true
+dnf remove -y 'firefox*' || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 echo "--> Upgrading all system packages..."
 dnf upgrade -y
 echo "--> Upgrading the core package group..."
-dnf group upgrade core -y || true
+dnf group upgrade core -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Refreshing firmware update metadata and installing updates..."
 if command -v fwupdmgr >/dev/null 2>&1; then
-    fwupdmgr refresh --force || true
-    fwupdmgr update -y || true
+    fwupdmgr refresh --force || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    fwupdmgr update -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
 
 # ==============================================================================
@@ -73,8 +74,8 @@ fi
 # ==============================================================================
 FEDORA_VERSION=$(rpm -E %fedora)
 echo "--> Installing RPM Fusion Free and Nonfree repositories..."
-dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm" || true
-dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm" || true
+dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm"
+dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm"
 
 echo "--> Adding third-party repositories..."
 # Terra repository
@@ -135,10 +136,10 @@ fi
 # APPLICATIONS & MULTIMEDIA SWAP (MUST RUN INDEPENDENTLY FOR ALLOWERASING)
 # ==============================================================================
 echo "--> Swapping ffmpeg-free with full ffmpeg..."
-dnf install -y ffmpeg --allowerasing || true
+dnf install -y ffmpeg --allowerasing
 
 echo "--> Installing RPM Fusion multimedia group..."
-dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin || true
+dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin
 
 # ==============================================================================
 # CONSOLIDATED PACKAGE INSTALLATION (FASTER TRANSACTION RESOLUTION)
@@ -151,7 +152,7 @@ dnf install -y \
   golang nodejs python3 python3-pip python3-devel distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
   scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver unrar p7zip p7zip-plugins \
-  libreoffice google-carlito-fonts google-crosextra-caladea-fonts || true
+  libreoffice google-carlito-fonts google-crosextra-caladea-fonts
 
 # ==============================================================================
 # SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
@@ -164,30 +165,33 @@ kernel.nmi_watchdog = 0
 vm.dirty_writeback_centisecs = 1500
 EOF
 chmod 0644 /etc/sysctl.d/99-swappiness.conf
-sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null || true
+sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Enabling noatime mount option for Btrfs volumes in /etc/fstab..."
-sed -i '/\sbtrfs\s/{/noatime/!s/\(subvol=[^[:space:],]*\)/\1,noatime/}' /etc/fstab
+cp -a /etc/fstab /etc/fstab.bak 2>/dev/null || true
+sed -i '/\sbtrfs\s/{/noatime/!s/\(subvol=[^[:space:],]*\)/\1,noatime/; s/,relatime//}' /etc/fstab
 echo "--> Reloading systemd daemon to refresh mounts..."
 systemctl daemon-reload
 
 echo "--> Remounting root filesystem..."
-mount -o remount / || true
+mount -o remount / || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Disabling NetworkManager-wait-online.service to speed up boot..."
-systemctl disable NetworkManager-wait-online.service || true
+systemctl disable NetworkManager-wait-online.service || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Enabling weekly SSD TRIM timer..."
-systemctl enable fstrim.timer || true
+systemctl enable fstrim.timer || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Enabling Bluetooth battery status reporting..."
 if [ -f /etc/bluetooth/main.conf ]; then
-    if grep -q '^#.*Experimental' /etc/bluetooth/main.conf; then
-        sed -i 's/^#.*Experimental.*/Experimental=true/' /etc/bluetooth/main.conf
-    elif ! grep -q '^Experimental.*=.*true' /etc/bluetooth/main.conf; then
-        sed -i '/^\[General\]/a Experimental=true' /etc/bluetooth/main.conf
+    if ! grep -q '^Experimental[[:space:]]*=' /etc/bluetooth/main.conf; then
+        if grep -q '^\[Policy\]' /etc/bluetooth/main.conf; then
+            sed -i '/^\[Policy\]/a Experimental=true' /etc/bluetooth/main.conf
+        else
+            printf '\n[Policy]\nExperimental=true\n' >> /etc/bluetooth/main.conf
+        fi
     fi
-    systemctl restart bluetooth || true
+    systemctl restart bluetooth || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
 
 echo "--> Capping systemd journal size to 500MB..."
@@ -196,7 +200,7 @@ cat > /etc/systemd/journald.conf.d/99-size.conf <<'EOF'
 [Journal]
 SystemMaxUse=500M
 EOF
-systemctl restart systemd-journald || true
+systemctl restart systemd-journald || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Setting GRUB timeout to 2 seconds..."
 if [ -f /etc/default/grub ]; then
@@ -205,7 +209,7 @@ if [ -f /etc/default/grub ]; then
     else
         echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
     fi
-    grub2-mkconfig -o /etc/grub2-efi.cfg >/dev/null 2>&1 || true
+    grub2-mkconfig -o /etc/grub2-efi.cfg >/dev/null 2>&1 || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
 
 echo "--> Masking unneeded services (ModemManager, cups, abrtd) if present..."
@@ -230,7 +234,7 @@ enabled-extensions=['dash-to-dock@micxgx.gmail.com', 'appindicatorsupport@rgcjon
 EOF
 
 echo "--> Compiling GLib schemas..."
-glib-compile-schemas /usr/share/glib-2.0/schemas/
+glib-compile-schemas /usr/share/glib-2.0/schemas/ || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Disabling GNOME Software autostart and search provider..."
 if [ "$TARGET_USER" != "root" ]; then
@@ -241,15 +245,15 @@ if [ "$TARGET_USER" != "root" ]; then
             echo "X-GNOME-Autostart-enabled=false" | sudo -u "$TARGET_USER" tee -a "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" >/dev/null
         fi
     fi
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" || true
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
 
 echo "--> Applying GNOME desktop polish (battery %, night light, tap-to-click, pinned apps)..."
 if [ "$TARGET_USER" != "root" ]; then
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.interface show-battery-percentage true || true
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled true || true
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true || true
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.shell favorite-apps "['org.gnome.Nautilus.desktop', 'google-chrome.desktop', 'code.desktop']" || true
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.interface show-battery-percentage true || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled true || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.shell favorite-apps "['org.gnome.Nautilus.desktop', 'google-chrome.desktop', 'code.desktop']" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
 
 # ==============================================================================
@@ -260,14 +264,14 @@ mkdir -p /etc/default
 echo "SCX_SCHEDULER=scx_bpfland" > /etc/default/scx
 
 echo "--> Enabling and starting sched-ext (SCX) service..."
-systemctl enable --now scx_loader || systemctl enable --now scx || true
+systemctl enable --now scx_loader || systemctl enable --now scx || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Setting up Flatpaks (Flatseal)..."
-flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 if flatpak remote-list | grep -q '^fedora'; then
-    flatpak remote-delete fedora || true
+    flatpak remote-delete fedora || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
-flatpak install -y flathub com.github.tchx84.Flatseal || true
+flatpak install -y flathub com.github.tchx84.Flatseal || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
 # LIBREOFFICE MICROSOFT COMPATIBILITY CONFIGURATION
@@ -325,7 +329,7 @@ if [ "$TARGET_USER" != "root" ]; then
     chown "$TARGET_USER":"$TARGET_GROUP" "$FONT_DIR"
     chmod 0755 "$FONT_DIR"
 
-    if [ ! -f "$FONT_DIR/FiraCode-Regular.ttf" ]; then
+    if ! ls "$FONT_DIR"/*.ttf >/dev/null 2>&1; then
         echo "--> Downloading and extracting Fira Code Nerd Font..."
         sudo -u "$TARGET_USER" curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz
         sudo -u "$TARGET_USER" tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR"
@@ -335,11 +339,11 @@ fi
 
 echo "--> Installing Microsoft Core Fonts installer..."
 if ! rpm -q msttcore-fonts-installer >/dev/null 2>&1; then
-    rpm -i --nodeps --nodigest https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm || true
+    rpm -i --nodeps --nodigest https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
 
 echo "--> Rebuilding font cache..."
-fc-cache -f || true
+fc-cache -f || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
 # DEV TOOLCHAINS & LANGUAGE SERVERS
@@ -349,14 +353,14 @@ if [ "$TARGET_USER" != "root" ]; then
     sudo -u "$TARGET_USER" bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
 
     echo "--> Installing rust-analyzer..."
-    sudo -u "$TARGET_USER" "$TARGET_HOME/.cargo/bin/rustup" component add rust-analyzer || true
+    sudo -u "$TARGET_USER" "$TARGET_HOME/.cargo/bin/rustup" component add rust-analyzer || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
     echo "--> Installing gopls (Go language server)..."
-    sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" go install golang.org/x/tools/gopls@latest || true
+    sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" go install golang.org/x/tools/gopls@latest || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
 
 echo "--> Installing TypeScript, its language server, and Reasonix CLI..."
-npm install -g typescript typescript-language-server reasonix || true
+npm install -g typescript typescript-language-server reasonix || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
 # SHELL & USABILITY POLISH
@@ -408,12 +412,17 @@ DNS=1.1.1.1 1.0.0.1
 FallbackDNS=8.8.8.8
 DNSOverTLS=yes
 EOF
-systemctl enable --now systemd-resolved || true
-ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
+systemctl enable --now systemd-resolved || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 mkdir -p /etc/NetworkManager/conf.d
 printf '[main]\ndns=systemd-resolved\n' > /etc/NetworkManager/conf.d/99-systemd-resolved.conf
-systemctl restart NetworkManager || true
+systemctl restart NetworkManager || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
-echo "Setup complete! Please restart your system or log out and back in to apply all updates."
-echo "=============================================================================="
+if [ "$FAILURES" -gt 0 ]; then
+    echo "Setup finished with $FAILURES failed step(s) - look for '!!' markers above."
+    echo "=============================================================================="
+else
+    echo "Setup complete! Please restart your system or log out and back in to apply all updates."
+    echo "=============================================================================="
+fi
 }
