@@ -11,7 +11,7 @@ By running this script, you can quickly bootstrap your Fedora desktop into a ful
 On a fresh Fedora installation, open your terminal and run the following command to initiate the entire setup automatically:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/roguehunter7/fedora-setup-ansible/main/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/roguehunter7/fedora-setup/main/setup.sh | sudo bash
 ```
 
 This single command fetches the setup script directly and executes it with root privileges to configure your system.
@@ -83,8 +83,8 @@ If you prefer to download and run the script manually:
 
 ### Step 1: Clone the Repository
 ```bash
-git clone https://github.com/roguehunter7/fedora-setup-ansible.git
-cd fedora-setup-ansible
+git clone https://github.com/roguehunter7/fedora-setup.git
+cd fedora-setup
 ```
 
 ### Step 2: Make the Script Executable
