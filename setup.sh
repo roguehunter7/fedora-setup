@@ -44,7 +44,7 @@ configure_dnf_speedups() {
     echo "--> Configuring DNF speedups in $conf_file..."
     for opt in max_parallel_downloads=20 defaultyes=True; do
         local key="${opt%%=*}" val="${opt#*=}"
-        sed -i "/^$key[[:space:]]*=/d" "$conf_file"
+        sed -i "/^${key}[[:space:]]*=/d" "$conf_file"
         sed -i "/^\[main\]/a $key = $val" "$conf_file"
     done
     chmod 0644 "$conf_file"
@@ -59,7 +59,7 @@ configure_dnf_speedups "/etc/dnf5/dnf.conf"
 echo "--> Uninstalling Firefox..."
 dnf remove -y 'firefox*' || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 echo "--> Upgrading all system packages..."
-dnf upgrade -y
+dnf upgrade -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 echo "--> Upgrading the core package group..."
 dnf group upgrade core -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
@@ -74,8 +74,8 @@ fi
 # ==============================================================================
 FEDORA_VERSION=$(rpm -E %fedora)
 echo "--> Installing RPM Fusion Free and Nonfree repositories..."
-dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm"
-dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm"
+dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Adding third-party repositories..."
 # Terra repository
@@ -122,7 +122,7 @@ enabled=1
 EOF
 
 echo "--> Enabling CachyOS COPR repository for sched-ext..."
-dnf copr enable -y bieszczaders/kernel-cachyos-addons
+dnf copr enable -y bieszczaders/kernel-cachyos-addons || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # Disable unused workstation repositories if file exists
 WORKSTATION_REPOS="/etc/yum.repos.d/fedora-workstation-repositories.repo"
@@ -136,10 +136,10 @@ fi
 # APPLICATIONS & MULTIMEDIA SWAP (MUST RUN INDEPENDENTLY FOR ALLOWERASING)
 # ==============================================================================
 echo "--> Swapping ffmpeg-free with full ffmpeg..."
-dnf install -y ffmpeg --allowerasing
+dnf install -y ffmpeg --allowerasing || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 echo "--> Installing RPM Fusion multimedia group..."
-dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin
+dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
 # CONSOLIDATED PACKAGE INSTALLATION (FASTER TRANSACTION RESOLUTION)
@@ -147,12 +147,13 @@ dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=Pac
 echo "--> Installing all applications, runtimes, development tools, and dependencies..."
 dnf install -y \
   @development-tools \
-  vlc gnome-boxes gstreamer1-plugins-ugly gstreamer1-plugins-bad-freeworld gstreamer1-libav lame-libs \
+  vlc gnome-boxes gstreamer1-plugins-ugly gstreamer1-plugins-bad-freeworld gstreamer1-plugin-libav lame-libs \
   code google-chrome-stable google-cloud-cli libxcrypt-compat \
   nodejs python3 python3-pip python3-devel distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
-  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver unrar p7zip p7zip-plugins \
-  libreoffice google-carlito-fonts google-crosextra-caladea-fonts
+  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver unrar 7zip 7zip-standalone \
+  libreoffice google-carlito-fonts google-crosextra-caladea-fonts \
+  || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
 # SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
@@ -209,7 +210,17 @@ if [ -f /etc/default/grub ]; then
     else
         echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
     fi
-    grub2-mkconfig -o /etc/grub2-efi.cfg >/dev/null 2>&1 || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    # Resolve the real grub.cfg path (BIOS: /etc/grub2.cfg, EFI: /etc/grub2-efi.cfg,
+    # both symlinks to /boot/grub2/grub.cfg on modern Fedora).
+    GRUB_CFG=""
+    [ -e /etc/grub2.cfg ] && GRUB_CFG=$(readlink -f /etc/grub2.cfg) || true
+    [ -z "$GRUB_CFG" ] && [ -e /etc/grub2-efi.cfg ] && GRUB_CFG=$(readlink -f /etc/grub2-efi.cfg) || true
+    [ -z "$GRUB_CFG" ] && [ -f /boot/grub2/grub.cfg ] && GRUB_CFG=/boot/grub2/grub.cfg
+    if [ -n "$GRUB_CFG" ]; then
+        grub2-mkconfig -o "$GRUB_CFG" >/dev/null 2>&1 || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    else
+        echo "  !! Warning: could not determine GRUB config path - timeout change may not apply"
+    fi
 fi
 
 echo "--> Masking unneeded services (ModemManager, cups, abrtd) if present..."

@@ -39,7 +39,7 @@ The steps run in the order listed below.
    - **Applications**: VLC, GNOME Boxes, Google Chrome, Visual Studio Code, LibreOffice.
    - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Node.js, and the Fedora **Development Tools** group.
    - **Container tools**: Distrobox.
-   - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, plus archive support (`unrar`, `p7zip`, `p7zip-plugins`).
+   - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, plus archive support (`unrar`, `7zip`, `7zip-standalone`).
 7. **General Linux & Storage Optimizations**:
    - **Memory Tuning**: Configures `vm.swappiness = 10`, `vm.vfs_cache_pressure = 50`, `kernel.nmi_watchdog = 0` (disables NMI watchdog), and `vm.dirty_writeback_centisecs = 1500` via a custom sysctl drop-in file (`/etc/sysctl.d/99-swappiness.conf`).
    - **Btrfs Performance Tuning**: Safely updates `/etc/fstab` to append the `noatime` option to Btrfs subvolumes, reducing write amplification on SSDs/NVMes, then remounts the root filesystem.
