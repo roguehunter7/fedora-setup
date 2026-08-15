@@ -72,94 +72,11 @@ dnf upgrade -y
 echo "--> Upgrading the core package group..."
 dnf group upgrade core -y || true
 
-# ==============================================================================
-# SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
-# ==============================================================================
-echo "--> Configuring VM swappiness, cache pressure, and power-saving sysctls..."
-cat > /etc/sysctl.d/99-swappiness.conf <<'EOF'
-vm.swappiness = 10
-vm.vfs_cache_pressure = 50
-kernel.nmi_watchdog = 0
-vm.dirty_writeback_centisecs = 1500
-EOF
-chmod 0644 /etc/sysctl.d/99-swappiness.conf
-sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null || true
-
-echo "--> Enabling noatime mount option for Btrfs volumes in /etc/fstab..."
-sed -i '/\sbtrfs\s/{/noatime/!s/\(subvol=[^[:space:],]*\)/\1,noatime/}' /etc/fstab
-echo "--> Reloading systemd daemon to refresh mounts..."
-systemctl daemon-reload
-
-echo "--> Remounting root filesystem..."
-mount -o remount / || true
-
-echo "--> Restarting NetworkManager to ensure connectivity..."
-systemctl restart NetworkManager
-sleep 3
-
-echo "--> Disabling NetworkManager-wait-online.service to speed up boot..."
-systemctl disable NetworkManager-wait-online.service || true
-
-echo "--> Enabling weekly SSD TRIM timer..."
-systemctl enable fstrim.timer || true
-
-echo "--> Configuring udev rules for HDD auto-spindown..."
-mkdir -p /etc/udev/rules.d
-cat <<EOF > /etc/udev/rules.d/69-hdparm.rules
-# Automatically spin down mechanical/rotational HDDs after 10 minutes of inactivity
-ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", RUN+="/usr/sbin/hdparm -B 127 -S 120 /dev/%k"
-EOF
-udevadm control --reload-rules && udevadm trigger || true
-
-echo "--> Enabling Bluetooth battery status reporting..."
-if [ -f /etc/bluetooth/main.conf ]; then
-    if grep -q '^#.*Experimental' /etc/bluetooth/main.conf; then
-        sed -i 's/^#.*Experimental.*/Experimental=true/' /etc/bluetooth/main.conf
-    elif ! grep -q '^Experimental.*=.*true' /etc/bluetooth/main.conf; then
-        sed -i '/^\[General\]/a Experimental=true' /etc/bluetooth/main.conf
-    fi
-    systemctl restart bluetooth || true
+echo "--> Refreshing firmware update metadata and installing updates..."
+if command -v fwupdmgr >/dev/null 2>&1; then
+    fwupdmgr refresh --force || true
+    fwupdmgr update -y || true
 fi
-
-echo "--> Capping systemd journal size to 500MB..."
-mkdir -p /etc/systemd/journald.conf.d
-cat > /etc/systemd/journald.conf.d/99-size.conf <<'EOF'
-[Journal]
-SystemMaxUse=500M
-EOF
-systemctl restart systemd-journald || true
-
-echo "--> Setting GRUB timeout to 2 seconds..."
-if [ -f /etc/default/grub ]; then
-    if grep -q '^GRUB_TIMEOUT=' /etc/default/grub; then
-        sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub
-    else
-        echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
-    fi
-    grub2-mkconfig -o /etc/grub2-efi.cfg >/dev/null 2>&1 || true
-fi
-
-echo "--> Masking unneeded services (ModemManager, cups, abrtd) if present..."
-for svc in ModemManager cups abrtd; do
-    if systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && systemctl list-unit-files "$svc.service" | grep -q "$svc.service"; then
-        systemctl mask --now "$svc.service" >/dev/null 2>&1 || true
-    fi
-done
-
-echo "--> Configuring systemd-resolved DNS (Cloudflare 1.1.1.1/1.0.0.1, fallback Google 8.8.8.8)..."
-mkdir -p /etc/systemd/resolved.conf.d
-cat > /etc/systemd/resolved.conf.d/99-dns.conf <<'EOF'
-[Resolve]
-DNS=1.1.1.1 1.0.0.1
-FallbackDNS=8.8.8.8
-DNSOverTLS=yes
-EOF
-systemctl enable --now systemd-resolved || true
-ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
-mkdir -p /etc/NetworkManager/conf.d
-printf '[main]\ndns=systemd-resolved\n' > /etc/NetworkManager/conf.d/99-systemd-resolved.conf
-systemctl restart NetworkManager || true
-
 
 # ==============================================================================
 # REPOSITORIES SETUP
@@ -215,6 +132,8 @@ EOF
 
 echo "--> Enabling CachyOS COPR repository for sched-ext..."
 dnf copr enable -y bieszczaders/kernel-cachyos-addons
+echo "--> Enabling jdtls (Eclipse JDT Language Server) COPR..."
+dnf copr enable -y karlinator/jdtls || true
 
 # Disable unused workstation repositories if file exists
 WORKSTATION_REPOS="/etc/yum.repos.d/fedora-workstation-repositories.repo"
@@ -243,8 +162,81 @@ dnf install -y \
   code google-chrome-stable google-cloud-cli libxcrypt-compat \
   golang nodejs python3 python3-pip python3-devel java-latest-openjdk distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
-  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm unrar p7zip p7zip-plugins \
+  scx-scheds scx-tools jdtls flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm unrar p7zip p7zip-plugins \
   libreoffice google-carlito-fonts google-crosextra-caladea-fonts || true
+
+
+# ==============================================================================
+# SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
+# ==============================================================================
+echo "--> Configuring VM swappiness, cache pressure, and power-saving sysctls..."
+cat > /etc/sysctl.d/99-swappiness.conf <<'EOF'
+vm.swappiness = 10
+vm.vfs_cache_pressure = 50
+kernel.nmi_watchdog = 0
+vm.dirty_writeback_centisecs = 1500
+EOF
+chmod 0644 /etc/sysctl.d/99-swappiness.conf
+sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null || true
+
+echo "--> Enabling noatime mount option for Btrfs volumes in /etc/fstab..."
+sed -i '/\sbtrfs\s/{/noatime/!s/\(subvol=[^[:space:],]*\)/\1,noatime/}' /etc/fstab
+echo "--> Reloading systemd daemon to refresh mounts..."
+systemctl daemon-reload
+
+echo "--> Remounting root filesystem..."
+mount -o remount / || true
+
+echo "--> Disabling NetworkManager-wait-online.service to speed up boot..."
+systemctl disable NetworkManager-wait-online.service || true
+
+echo "--> Enabling weekly SSD TRIM timer..."
+systemctl enable fstrim.timer || true
+
+echo "--> Configuring udev rules for HDD auto-spindown..."
+mkdir -p /etc/udev/rules.d
+cat <<EOF > /etc/udev/rules.d/69-hdparm.rules
+# Automatically spin down mechanical/rotational HDDs after 10 minutes of inactivity
+ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", RUN+="/usr/sbin/hdparm -B 127 -S 120 /dev/%k"
+EOF
+udevadm control --reload-rules && udevadm trigger || true
+
+echo "--> Enabling Bluetooth battery status reporting..."
+if [ -f /etc/bluetooth/main.conf ]; then
+    if grep -q '^#.*Experimental' /etc/bluetooth/main.conf; then
+        sed -i 's/^#.*Experimental.*/Experimental=true/' /etc/bluetooth/main.conf
+    elif ! grep -q '^Experimental.*=.*true' /etc/bluetooth/main.conf; then
+        sed -i '/^\[General\]/a Experimental=true' /etc/bluetooth/main.conf
+    fi
+    systemctl restart bluetooth || true
+fi
+
+echo "--> Capping systemd journal size to 500MB..."
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/99-size.conf <<'EOF'
+[Journal]
+SystemMaxUse=500M
+EOF
+systemctl restart systemd-journald || true
+
+echo "--> Setting GRUB timeout to 2 seconds..."
+if [ -f /etc/default/grub ]; then
+    if grep -q '^GRUB_TIMEOUT=' /etc/default/grub; then
+        sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub
+    else
+        echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
+    fi
+    grub2-mkconfig -o /etc/grub2-efi.cfg >/dev/null 2>&1 || true
+fi
+
+echo "--> Masking unneeded services (ModemManager, cups, abrtd) if present..."
+for svc in ModemManager cups abrtd; do
+    if systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && systemctl list-unit-files "$svc.service" | grep -q "$svc.service"; then
+        systemctl mask --now "$svc.service" >/dev/null 2>&1 || true
+    fi
+done
+
+
 
 
 # ==============================================================================
@@ -301,11 +293,6 @@ if flatpak remote-list | grep -q '^fedora'; then
 fi
 flatpak install -y flathub com.github.tchx84.Flatseal || true
 
-echo "--> Refreshing firmware update metadata and installing updates..."
-if command -v fwupdmgr >/dev/null 2>&1; then
-    fwupdmgr refresh --force || true
-    fwupdmgr update -y || true
-fi
 
 # ==============================================================================
 # LIBREOFFICE MICROSOFT COMPATIBILITY CONFIGURATION
@@ -392,10 +379,6 @@ if [ "$TARGET_USER" != "root" ]; then
     sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" go install golang.org/x/tools/gopls@latest || true
 fi
 
-echo "--> Enabling jdtls (Eclipse JDT Language Server) from COPR..."
-dnf copr enable -y karlinator/jdtls || true
-dnf install -y jdtls || true
-
 echo "--> Installing TypeScript, its language server, and Reasonix CLI..."
 npm install -g typescript typescript-language-server reasonix || true
 
@@ -440,6 +423,23 @@ echo "Defaults pwfeedback" > /etc/sudoers.d/pwfeedback
 chmod 0440 /etc/sudoers.d/pwfeedback
 
 echo "=============================================================================="
+# ==============================================================================
+# DNS (SYSTEMD-RESOLVED) — DONE LAST SO A NETWORK RESTART CANNOT INTERRUPT EARLIER STEPS
+# ==============================================================================
+echo "--> Configuring systemd-resolved DNS (Cloudflare 1.1.1.1/1.0.0.1, fallback Google 8.8.8.8)..."
+mkdir -p /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/99-dns.conf <<'EOF'
+[Resolve]
+DNS=1.1.1.1 1.0.0.1
+FallbackDNS=8.8.8.8
+DNSOverTLS=yes
+EOF
+systemctl enable --now systemd-resolved || true
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
+mkdir -p /etc/NetworkManager/conf.d
+printf '[main]\ndns=systemd-resolved\n' > /etc/NetworkManager/conf.d/99-systemd-resolved.conf
+systemctl restart NetworkManager || true
+
 echo "Setup complete! Please restart your system or log out and back in to apply all updates."
 echo "=============================================================================="
 }
