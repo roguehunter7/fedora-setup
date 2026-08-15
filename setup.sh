@@ -18,7 +18,6 @@ fi
 # Redirect standard input from /dev/null to prevent commands from swallowing the script when piped (e.g. curl | bash)
 exec < /dev/null
 
-
 # ==============================================================================
 # USER DISCOVERY
 # ==============================================================================
@@ -40,23 +39,14 @@ echo "--> Target Home: $TARGET_HOME"
 # ==============================================================================
 configure_dnf_speedups() {
     local conf_file="$1"
-    if [ -f "$conf_file" ]; then
-        echo "--> Configuring DNF speedups in $conf_file..."
-        for opt in max_parallel_downloads=20 defaultyes=True; do
-            key="${opt%%=*}"
-            val="${opt#*=}"
-            if grep -q "^\[main\]" "$conf_file"; then
-                if grep -q "^$key[[:space:]]*=" "$conf_file"; then
-                    sed -i "s/^$key[[:space:]]*=.*/$key = $val/" "$conf_file"
-                else
-                    sed -i "/^\[main\]/a $key = $val" "$conf_file"
-                fi
-            else
-                echo -e "[main]\n$key = $val" >> "$conf_file"
-            fi
-        done
-        chmod 0644 "$conf_file"
-    fi
+    [ -f "$conf_file" ] || return 0
+    echo "--> Configuring DNF speedups in $conf_file..."
+    for opt in max_parallel_downloads=20 defaultyes=True; do
+        local key="${opt%%=*}" val="${opt#*=}"
+        sed -i "/^$key[[:space:]]*=/d" "$conf_file"
+        sed -i "/^\[main\]/a $key = $val" "$conf_file"
+    done
+    chmod 0644 "$conf_file"
 }
 
 configure_dnf_speedups "/etc/dnf/dnf.conf"
@@ -160,9 +150,8 @@ dnf install -y \
   code google-chrome-stable google-cloud-cli libxcrypt-compat \
   golang nodejs python3 python3-pip python3-devel distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
-  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm unrar p7zip p7zip-plugins \
+  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver unrar p7zip p7zip-plugins \
   libreoffice google-carlito-fonts google-crosextra-caladea-fonts || true
-
 
 # ==============================================================================
 # SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
@@ -190,14 +179,6 @@ systemctl disable NetworkManager-wait-online.service || true
 
 echo "--> Enabling weekly SSD TRIM timer..."
 systemctl enable fstrim.timer || true
-
-echo "--> Configuring udev rules for HDD auto-spindown..."
-mkdir -p /etc/udev/rules.d
-cat <<EOF > /etc/udev/rules.d/69-hdparm.rules
-# Automatically spin down mechanical/rotational HDDs after 10 minutes of inactivity
-ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", RUN+="/usr/sbin/hdparm -B 127 -S 120 /dev/%k"
-EOF
-udevadm control --reload-rules && udevadm trigger || true
 
 echo "--> Enabling Bluetooth battery status reporting..."
 if [ -f /etc/bluetooth/main.conf ]; then
@@ -229,13 +210,8 @@ fi
 
 echo "--> Masking unneeded services (ModemManager, cups, abrtd) if present..."
 for svc in ModemManager cups abrtd; do
-    if systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && systemctl list-unit-files "$svc.service" | grep -q "$svc.service"; then
-        systemctl mask --now "$svc.service" >/dev/null 2>&1 || true
-    fi
+    systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && systemctl mask --now "$svc.service" >/dev/null 2>&1 || true
 done
-
-
-
 
 # ==============================================================================
 # GNOME CONFIGURATIONS (SYSTEM-WIDE DEFAULTS)
@@ -261,7 +237,9 @@ if [ "$TARGET_USER" != "root" ]; then
     sudo -u "$TARGET_USER" mkdir -p "$TARGET_HOME/.config/autostart"
     if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
         sudo -u "$TARGET_USER" cp /usr/share/applications/org.gnome.Software.desktop "$TARGET_HOME/.config/autostart/"
-        echo "X-GNOME-Autostart-enabled=false" | sudo -u "$TARGET_USER" tee -a "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" >/dev/null
+        if ! grep -q 'X-GNOME-Autostart-enabled=false' "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" 2>/dev/null; then
+            echo "X-GNOME-Autostart-enabled=false" | sudo -u "$TARGET_USER" tee -a "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" >/dev/null
+        fi
     fi
     sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" || true
 fi
@@ -290,7 +268,6 @@ if flatpak remote-list | grep -q '^fedora'; then
     flatpak remote-delete fedora || true
 fi
 flatpak install -y flathub com.github.tchx84.Flatseal || true
-
 
 # ==============================================================================
 # LIBREOFFICE MICROSOFT COMPATIBILITY CONFIGURATION
@@ -338,7 +315,6 @@ else
     echo "Warning: Could not find LibreOffice share/registry directory."
 fi
 
-
 # ==============================================================================
 # FONTS (NERD FONTS & MICROSOFT CORE FONTS)
 # ==============================================================================
@@ -349,10 +325,12 @@ if [ "$TARGET_USER" != "root" ]; then
     chown "$TARGET_USER":"$TARGET_GROUP" "$FONT_DIR"
     chmod 0755 "$FONT_DIR"
 
-    echo "--> Downloading and extracting Fira Code Nerd Font..."
-    sudo -u "$TARGET_USER" curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz
-    sudo -u "$TARGET_USER" tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR"
-    rm -f "$TARGET_HOME/FiraCode.tar.xz"
+    if [ ! -f "$FONT_DIR/FiraCode-Regular.ttf" ]; then
+        echo "--> Downloading and extracting Fira Code Nerd Font..."
+        sudo -u "$TARGET_USER" curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz
+        sudo -u "$TARGET_USER" tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR"
+        rm -f "$TARGET_HOME/FiraCode.tar.xz"
+    fi
 fi
 
 echo "--> Installing Microsoft Core Fonts installer..."
@@ -379,7 +357,6 @@ fi
 
 echo "--> Installing TypeScript, its language server, and Reasonix CLI..."
 npm install -g typescript typescript-language-server reasonix || true
-
 
 # ==============================================================================
 # SHELL & USABILITY POLISH
@@ -420,7 +397,6 @@ echo "--> Enabling sudo password feedback..."
 echo "Defaults pwfeedback" > /etc/sudoers.d/pwfeedback
 chmod 0440 /etc/sudoers.d/pwfeedback
 
-echo "=============================================================================="
 # ==============================================================================
 # DNS (SYSTEMD-RESOLVED) — DONE LAST SO A NETWORK RESTART CANNOT INTERRUPT EARLIER STEPS
 # ==============================================================================
