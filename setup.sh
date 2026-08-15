@@ -266,12 +266,12 @@ echo "SCX_SCHEDULER=scx_bpfland" > /etc/default/scx
 echo "--> Enabling and starting sched-ext (SCX) service..."
 systemctl enable --now scx_loader || systemctl enable --now scx || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
-echo "--> Setting up Flatpaks (Flatseal)..."
+echo "--> Setting up Flatpaks (Flathub repo + update)..."
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 if flatpak remote-list | grep -q '^fedora'; then
     flatpak remote-delete fedora || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
-flatpak install -y flathub com.github.tchx84.Flatseal || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+flatpak update -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
 # LIBREOFFICE MICROSOFT COMPATIBILITY CONFIGURATION

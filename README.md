@@ -54,7 +54,7 @@ The steps run in the order listed below.
    - Applies desktop polish via gsettings: battery percentage, night light, tap-to-click, and pinned favorite apps (Files, Chrome, VS Code).
    - Disables **GNOME Software** autostart and its search provider to save memory.
 9. **Performance Scheduler (sched-ext)**: Installs **SCX** from the CachyOS COPR and configures the system to use the **`scx_bpfland`** scheduler (pure-BPF, battery-friendly — ideal for laptops) for desktop responsiveness.
-10. **Flatpak Integration**: Registers **Flathub**, removes the Fedora Flatpak remote, and installs **Flatseal**.
+10. **Flatpak Integration**: Registers **Flathub**, removes the Fedora Flatpak remote, and updates installed Flatpaks.
 11. **LibreOffice Microsoft Compatibility**: Configures LibreOffice to default to saving in Microsoft Office XML formats (DOCX, XLSX, PPTX) via a global registry override.
 12. **Font Polish (Nerd Fonts & Microsoft Fonts)**:
     - Downloads and extracts the **Fira Code Nerd Font** into the user's local fonts directory.
