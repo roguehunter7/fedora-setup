@@ -75,10 +75,12 @@ dnf group upgrade core -y || true
 # ==============================================================================
 # SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
 # ==============================================================================
-echo "--> Configuring VM swappiness and cache pressure..."
+echo "--> Configuring VM swappiness, cache pressure, and power-saving sysctls..."
 cat > /etc/sysctl.d/99-swappiness.conf <<'EOF'
 vm.swappiness = 10
 vm.vfs_cache_pressure = 50
+kernel.nmi_watchdog = 0
+vm.dirty_writeback_centisecs = 1500
 EOF
 chmod 0644 /etc/sysctl.d/99-swappiness.conf
 sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null || true
@@ -126,6 +128,37 @@ cat > /etc/systemd/journald.conf.d/99-size.conf <<'EOF'
 SystemMaxUse=500M
 EOF
 systemctl restart systemd-journald || true
+
+echo "--> Setting GRUB timeout to 2 seconds..."
+if [ -f /etc/default/grub ]; then
+    if grep -q '^GRUB_TIMEOUT=' /etc/default/grub; then
+        sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub
+    else
+        echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
+    fi
+    grub2-mkconfig -o /etc/grub2-efi.cfg >/dev/null 2>&1 || true
+fi
+
+echo "--> Masking unneeded services (ModemManager, cups, abrtd) if present..."
+for svc in ModemManager cups abrtd; do
+    if systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && systemctl list-unit-files "$svc.service" | grep -q "$svc.service"; then
+        systemctl mask --now "$svc.service" >/dev/null 2>&1 || true
+    fi
+done
+
+echo "--> Configuring systemd-resolved DNS (Cloudflare 1.1.1.1/1.0.0.1, fallback Google 8.8.8.8)..."
+mkdir -p /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/99-dns.conf <<'EOF'
+[Resolve]
+DNS=1.1.1.1 1.0.0.1
+FallbackDNS=8.8.8.8
+DNSOverTLS=yes
+EOF
+systemctl enable --now systemd-resolved || true
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
+mkdir -p /etc/NetworkManager/conf.d
+printf '[main]\ndns=systemd-resolved\n' > /etc/NetworkManager/conf.d/99-systemd-resolved.conf
+systemctl restart NetworkManager || true
 
 
 # ==============================================================================
@@ -241,6 +274,14 @@ if [ "$TARGET_USER" != "root" ]; then
         echo "X-GNOME-Autostart-enabled=false" | sudo -u "$TARGET_USER" tee -a "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" >/dev/null
     fi
     sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" || true
+fi
+
+echo "--> Applying GNOME desktop polish (battery %, night light, tap-to-click, pinned apps)..."
+if [ "$TARGET_USER" != "root" ]; then
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.interface show-battery-percentage true || true
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled true || true
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true || true
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.shell favorite-apps "['org.gnome.Nautilus.desktop', 'google-chrome.desktop', 'code.desktop']" || true
 fi
 
 # ==============================================================================

@@ -30,18 +30,20 @@ This single command fetches the setup script directly and executes it with root 
    - Enables the **CachyOS COPR** repository for sched-ext.
    - Disables unused, limited third-party repositories (**NVIDIA** and **Steam** subsets) to prevent DNF metadata bloat on AMD hardware.
 5. **General Linux & Storage Optimizations**:
-   - **Memory Tuning**: Configures `vm.swappiness = 10` and `vm.vfs_cache_pressure = 50` via a custom sysctl drop-in file (`/etc/sysctl.d/99-swappiness.conf`).
+   - **Memory Tuning**: Configures `vm.swappiness = 10`, `vm.vfs_cache_pressure = 50`, `kernel.nmi_watchdog = 0` (disables NMI watchdog), and `vm.dirty_writeback_centisecs = 1500` via a custom sysctl drop-in file (`/etc/sysctl.d/99-swappiness.conf`).
    - **Btrfs Performance Tuning**: Safely updates `/etc/fstab` to append the `noatime` option to Btrfs subvolumes, reducing write amplification on SSDs/NVMes, then remounts the root filesystem.
    - **Bluetooth Battery Reporting**: Enables BlueZ experimental features to show battery levels for connected Bluetooth devices in the GNOME Quick Settings.
    - **SSD TRIM & Lifespan**: Activates the weekly `fstrim.timer`.
    - **HDD Auto-Spindown**: Adds a `udev` rule that spins down mechanical drives using `hdparm` after 10 minutes of inactivity.
-   - **Boot Speed**: Disables `NetworkManager-wait-online.service` (saves seconds on boot) and caps the systemd journal at 500MB.
+   - **Boot Speed**: Disables `NetworkManager-wait-online.service` (saves seconds on boot), caps the systemd journal at 500MB, reduces the GRUB timeout to 2 seconds, and masks unneeded services (`ModemManager`, `cups`, `abrtd`) when present.
+   - **DNS**: Enables `systemd-resolved` with Cloudflare **1.1.1.1 / 1.0.0.1**, falling back to Google **8.8.8.8**, with **DNS over TLS**.
    - **Firmware**: Refreshes LVFS metadata and installs pending device firmware updates via `fwupdmgr`.
 6. **GNOME Customization & Desktop Tweaks**:
    - Installs **GNOME Tweaks** and the graphical **GNOME Extensions App**.
    - Installs and enables the **Dash to Dock** and **AppIndicator** extensions.
    - Configures window controls to **enable Minimize and Maximize buttons**.
    - Sets the global system color scheme preference to **Dark Mode**.
+   - Applies desktop polish via gsettings: battery percentage, night light, tap-to-click, and pinned favorite apps (Files, Chrome, VS Code).
    - Disables **GNOME Software** autostart and its search provider to save memory.
 7. **Multimedia Swap & Video Acceleration**:
    - Swaps out Fedora's restricted `ffmpeg-free` for full `ffmpeg` from RPM Fusion.
