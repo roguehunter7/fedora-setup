@@ -22,7 +22,7 @@ This single command fetches the setup script directly and executes it with root 
 
 1. **DNF Speed Optimizations**: Configures `max_parallel_downloads=20` and `defaultyes=True` for both DNF and DNF5 to make package updates much faster.
 2. **App Cleanup (Removal)**: Uninstalls the default **Firefox** browser (Chrome is the preferred browser).
-3. **System-wide Package Upgrade**: Upgrades all pre-installed system packages to their latest versions.
+3. **System-wide Package Upgrade**: Upgrades all pre-installed system packages to their latest versions, including the **core package group** (`dnf group upgrade core`).
 4. **Repository Configuration**:
    - Enables **RPM Fusion (Free & Non-Free)** repositories.
    - Enables the **Terra Repository** (maintained by Fyra Labs).
@@ -30,16 +30,19 @@ This single command fetches the setup script directly and executes it with root 
    - Enables the **CachyOS COPR** repository for sched-ext.
    - Disables unused, limited third-party repositories (**NVIDIA** and **Steam** subsets) to prevent DNF metadata bloat on AMD hardware.
 5. **General Linux & Storage Optimizations**:
-   - **Swappiness Tuning**: Configures `vm.swappiness = 10` via a custom sysctl drop-in file (`/etc/sysctl.d/99-swappiness.conf`).
+   - **Memory Tuning**: Configures `vm.swappiness = 10` and `vm.vfs_cache_pressure = 50` via a custom sysctl drop-in file (`/etc/sysctl.d/99-swappiness.conf`).
    - **Btrfs Performance Tuning**: Safely updates `/etc/fstab` to append the `noatime` option to Btrfs subvolumes, reducing write amplification on SSDs/NVMes, then remounts the root filesystem.
    - **Bluetooth Battery Reporting**: Enables BlueZ experimental features to show battery levels for connected Bluetooth devices in the GNOME Quick Settings.
    - **SSD TRIM & Lifespan**: Activates the weekly `fstrim.timer`.
    - **HDD Auto-Spindown**: Adds a `udev` rule that spins down mechanical drives using `hdparm` after 10 minutes of inactivity.
+   - **Boot Speed**: Disables `NetworkManager-wait-online.service` (saves seconds on boot) and caps the systemd journal at 500MB.
+   - **Firmware**: Refreshes LVFS metadata and installs pending device firmware updates via `fwupdmgr`.
 6. **GNOME Customization & Desktop Tweaks**:
    - Installs **GNOME Tweaks** and the graphical **GNOME Extensions App**.
    - Installs and enables the **Dash to Dock** and **AppIndicator** extensions.
    - Configures window controls to **enable Minimize and Maximize buttons**.
    - Sets the global system color scheme preference to **Dark Mode**.
+   - Disables **GNOME Software** autostart and its search provider to save memory.
 7. **Multimedia Swap & Video Acceleration**:
    - Swaps out Fedora's restricted `ffmpeg-free` for full `ffmpeg` from RPM Fusion.
    - Installs the `@multimedia` package group.
@@ -48,8 +51,8 @@ This single command fetches the setup script directly and executes it with root 
    - **Applications**: VLC, GNOME Boxes, Google Chrome, Visual Studio Code, LibreOffice.
    - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Go, Node.js, Java OpenJDK, and the Fedora **Development Tools** group.
    - **Container tools**: Distrobox.
-   - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, hdparm.
-9. **Performance Scheduler (sched-ext)**: Installs **SCX** from the CachyOS COPR and configures the system to use the **`scx_rustland`** scheduler for maximum desktop responsiveness.
+   - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, hdparm, plus archive support (`unrar`, `p7zip`, `p7zip-plugins`).
+9. **Performance Scheduler (sched-ext)**: Installs **SCX** from the CachyOS COPR and configures the system to use the **`scx_bpfland`** scheduler (pure-BPF, battery-friendly — ideal for laptops) for desktop responsiveness.
 10. **Flatpak Integration**: Registers **Flathub**, removes the Fedora Flatpak remote, and installs **Flatseal**.
 11. **Font Polish (Nerd Fonts & Microsoft Fonts)**:
     - Downloads and extracts the **Fira Code Nerd Font** into the user's local fonts directory.

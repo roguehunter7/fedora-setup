@@ -69,12 +69,17 @@ echo "--> Uninstalling Firefox..."
 dnf remove -y 'firefox*' || true
 echo "--> Upgrading all system packages..."
 dnf upgrade -y
+echo "--> Upgrading the core package group..."
+dnf group upgrade core -y || true
 
 # ==============================================================================
 # SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
 # ==============================================================================
-echo "--> Configuring VM swappiness to 10..."
-echo "vm.swappiness = 10" > /etc/sysctl.d/99-swappiness.conf
+echo "--> Configuring VM swappiness and cache pressure..."
+cat > /etc/sysctl.d/99-swappiness.conf <<'EOF'
+vm.swappiness = 10
+vm.vfs_cache_pressure = 50
+EOF
 chmod 0644 /etc/sysctl.d/99-swappiness.conf
 sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null || true
 
@@ -89,6 +94,9 @@ mount -o remount / || true
 echo "--> Restarting NetworkManager to ensure connectivity..."
 systemctl restart NetworkManager
 sleep 3
+
+echo "--> Disabling NetworkManager-wait-online.service to speed up boot..."
+systemctl disable NetworkManager-wait-online.service || true
 
 echo "--> Enabling weekly SSD TRIM timer..."
 systemctl enable fstrim.timer || true
@@ -110,6 +118,14 @@ if [ -f /etc/bluetooth/main.conf ]; then
     fi
     systemctl restart bluetooth || true
 fi
+
+echo "--> Capping systemd journal size to 500MB..."
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/99-size.conf <<'EOF'
+[Journal]
+SystemMaxUse=500M
+EOF
+systemctl restart systemd-journald || true
 
 
 # ==============================================================================
@@ -194,7 +210,7 @@ dnf install -y \
   code google-chrome-stable google-cloud-cli libxcrypt-compat \
   golang nodejs python3 python3-pip python3-devel java-latest-openjdk distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
   gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
-  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm \
+  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver hdparm unrar p7zip p7zip-plugins \
   libreoffice google-carlito-fonts google-crosextra-caladea-fonts || true
 
 
@@ -217,12 +233,22 @@ EOF
 echo "--> Compiling GLib schemas..."
 glib-compile-schemas /usr/share/glib-2.0/schemas/
 
+echo "--> Disabling GNOME Software autostart and search provider..."
+if [ "$TARGET_USER" != "root" ]; then
+    sudo -u "$TARGET_USER" mkdir -p "$TARGET_HOME/.config/autostart"
+    if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
+        sudo -u "$TARGET_USER" cp /usr/share/applications/org.gnome.Software.desktop "$TARGET_HOME/.config/autostart/"
+        echo "X-GNOME-Autostart-enabled=false" | sudo -u "$TARGET_USER" tee -a "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" >/dev/null
+    fi
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" || true
+fi
+
 # ==============================================================================
 # PERFORMANCE SCHEDULER & FLATPAK
 # ==============================================================================
-echo "--> Configuring sched-ext (SCX) to use scx_rustland..."
+echo "--> Configuring sched-ext (SCX) to use scx_bpfland..."
 mkdir -p /etc/default
-echo "SCX_SCHEDULER=scx_rustland" > /etc/default/scx
+echo "SCX_SCHEDULER=scx_bpfland" > /etc/default/scx
 
 echo "--> Enabling and starting sched-ext (SCX) service..."
 systemctl enable --now scx_loader || systemctl enable --now scx || true
@@ -233,6 +259,12 @@ if flatpak remote-list | grep -q '^fedora'; then
     flatpak remote-delete fedora || true
 fi
 flatpak install -y flathub com.github.tchx84.Flatseal || true
+
+echo "--> Refreshing firmware update metadata and installing updates..."
+if command -v fwupdmgr >/dev/null 2>&1; then
+    fwupdmgr refresh --force || true
+    fwupdmgr update -y || true
+fi
 
 # ==============================================================================
 # LIBREOFFICE MICROSOFT COMPATIBILITY CONFIGURATION
