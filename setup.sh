@@ -1,14 +1,34 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Fedora Post-Install Setup Bootstrapper
+# Fedora Sway Spin - Post-Install Setup (F44+)
 # ==============================================================================
-# This script automates system optimization, repository configurations, package
-# management, GNOME customizations, and development tool installs on Fedora.
+# Target   : Fresh Fedora 44+ Sway spin install (NOT Fedora Workstation)
+# Hardware : AMD Ryzen/Picasso laptop (amdgpu, Vega 8, VCN), any WiFi
+# Audience : tiling-WM beginner coming from GNOME
+#
+# Optional flags (set env vars before running, e.g. `SCX=1 sudo ./setup.sh`):
+#   SCX=1          Install sched-ext (scx_bpfland) from the CachyOS COPR.
+#                  Default off: gains on 4C/8T Zen+ are modest; COPR is
+#                  third-party. Enable only if you know you want it.
+#   MS_CORE_FONTS=1 Install MS core fonts via the SourceForge third-party RPM
+#                  (no signature verification possible). Default off; the
+#                  metric-compatible Carlito/Caladea fonts are installed by
+#                  default and cover LibreOffice compatibility fine.
+#   DNS_OVER_TLS=1 Enable DNS-over-TLS for systemd-resolved. Default off:
+#                  port 853 is blocked on some networks and breaks captive
+#                  portals / split-horizon DNS.
+#
+# Run:   git clone <this repo> && read this file && sudo ./setup.sh
+# Never: curl | sudo bash.  You verified this script yourself.
 # ==============================================================================
 
 {
 set -euo pipefail
 FAILURES=0
+
+SCX="${SCX:-0}"
+MS_CORE_FONTS="${MS_CORE_FONTS:-0}"
+DNS_OVER_TLS="${DNS_OVER_TLS:-0}"
 
 # Ensure script is run as root
 if [ "$(id -u)" -ne 0 ]; then
@@ -16,7 +36,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# Redirect standard input from /dev/null to prevent commands from swallowing the script when piped (e.g. curl | bash)
+# Prevent commands from swallowing the script when executed from a pipe
 exec < /dev/null
 
 # ==============================================================================
@@ -31,12 +51,10 @@ else
     TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
     TARGET_GROUP=$(id -gn "$TARGET_USER")
 fi
-
-echo "--> Target User: $TARGET_USER"
-echo "--> Target Home: $TARGET_HOME"
+echo "--> Target User: $TARGET_USER  |  Home: $TARGET_HOME"
 
 # ==============================================================================
-# PACKAGE MANAGER OPTIMIZATIONS (DNF / DNF5) & SYSTEM UPGRADE
+# 1. DNF SPEEDUPS (works for both dnf5 and legacy dnf configs)
 # ==============================================================================
 configure_dnf_speedups() {
     local conf_file="$1"
@@ -49,48 +67,36 @@ configure_dnf_speedups() {
     done
     chmod 0644 "$conf_file"
 }
-
 configure_dnf_speedups "/etc/dnf/dnf.conf"
 configure_dnf_speedups "/etc/dnf5/dnf.conf"
 
 # ==============================================================================
-# REMOVE UNWANTED DEFAULT APPLICATIONS
+# 2. BASE SYSTEM UPGRADE
+#    Done BEFORE third-party repos so only official Fedora packages are
+#    involved in the base upgrade.
 # ==============================================================================
-echo "--> Uninstalling Firefox..."
-dnf remove -y 'firefox*' || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-echo "--> Upgrading all system packages..."
-dnf upgrade -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+echo "--> Upgrading all system packages (official repos only)..."
+dnf upgrade -y --refresh || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 echo "--> Upgrading the core package group..."
 dnf group upgrade core -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
-echo "--> Refreshing firmware update metadata and installing updates..."
-if command -v fwupdmgr >/dev/null 2>&1; then
-    fwupdmgr refresh --force || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-    fwupdmgr update -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-fi
-
 # ==============================================================================
-# REPOSITORIES SETUP
+# 3. THIRD-PARTY REPOSITORIES
 # ==============================================================================
 FEDORA_VERSION=$(rpm -E %fedora)
+
 echo "--> Installing RPM Fusion Free and Nonfree repositories..."
 dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 dnf install -y "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
-echo "--> Adding third-party repositories..."
-# Terra repository
-cat <<EOF > /etc/yum.repos.d/terra.repo
-[terra]
-name=Terra \$releasever
-baseurl=https://repos.fyralabs.com/terra\$releasever
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://repos.fyralabs.com/terra\$releasever/key.asc
-skip_if_unavailable=1
-enabled=1
-EOF
+if [ "$SCX" = "1" ]; then
+    echo "--> Enabling CachyOS COPR for sched-ext (optional, flag SCX=1)..."
+    dnf copr enable -y bieszczaders/kernel-cachyos-addons || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+fi
 
-# VS Code repository
+# First-party vendor repos (each is a deliberate trust decision - review them)
+mkdir -p /etc/yum.repos.d
+echo "--> Adding VS Code repository..."
 cat <<EOF > /etc/yum.repos.d/vscode.repo
 [vscode]
 name=Visual Studio Code
@@ -100,7 +106,7 @@ gpgkey=https://packages.microsoft.com/keys/microsoft.asc
 enabled=1
 EOF
 
-# Google Chrome repository
+echo "--> Adding Google Chrome repository..."
 cat <<EOF > /etc/yum.repos.d/google-chrome.repo
 [google-chrome]
 name=Google Chrome
@@ -110,7 +116,7 @@ gpgkey=https://dl.google.com/linux/linux_signing_key.pub
 enabled=1
 EOF
 
-# Google Cloud CLI repository
+echo "--> Adding Google Cloud CLI repository..."
 cat <<EOF > /etc/yum.repos.d/google-cloud-cli.repo
 [google-cloud-cli]
 name=Google Cloud CLI
@@ -121,10 +127,7 @@ gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
 enabled=1
 EOF
 
-echo "--> Enabling CachyOS COPR repository for sched-ext..."
-dnf copr enable -y bieszczaders/kernel-cachyos-addons || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-
-# Disable unused workstation repositories if file exists
+# Disable unused limited third-party repos (NVIDIA & Steam) on AMD hardware
 WORKSTATION_REPOS="/etc/yum.repos.d/fedora-workstation-repositories.repo"
 if [ -f "$WORKSTATION_REPOS" ]; then
     echo "--> Disabling unused Workstation repositories (NVIDIA & Steam)..."
@@ -132,8 +135,9 @@ if [ -f "$WORKSTATION_REPOS" ]; then
         sed -i "/^\[$section\]/,/^\[/{s/^enabled=.*/enabled=0/}" "$WORKSTATION_REPOS"
     done
 fi
+
 # ==============================================================================
-# APPLICATIONS & MULTIMEDIA SWAP (MUST RUN INDEPENDENTLY FOR ALLOWERASING)
+# 4. MULTIMEDIA SWAP (needs RPM Fusion, does not affect base system)
 # ==============================================================================
 echo "--> Swapping ffmpeg-free with full ffmpeg..."
 dnf install -y ffmpeg --allowerasing || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
@@ -142,58 +146,81 @@ echo "--> Installing RPM Fusion multimedia group..."
 dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
-# CONSOLIDATED PACKAGE INSTALLATION (FASTER TRANSACTION RESOLUTION)
+# 5. CONSOLIDATED PACKAGE INSTALLATION (single transaction)
+#    Sway-first list: compositor, ecosystem, portals, AMD HW accel, laptop power
 # ==============================================================================
-echo "--> Installing all applications, runtimes, development tools, and dependencies..."
-dnf install -y \
-  @development-tools \
-  vlc gnome-boxes gstreamer1-plugins-ugly gstreamer1-plugins-bad-freeworld gstreamer1-plugin-libav lame-libs \
-  code google-chrome-stable google-cloud-cli libxcrypt-compat \
-  nodejs python3 python3-pip python3-devel distrobox zsh zsh-syntax-highlighting zsh-autosuggestions starship \
-  gnome-tweaks gnome-extensions-app gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator \
-  scx-scheds scx-tools flatpak cabextract mkfontscale fontconfig mesa-va-drivers-freeworld intel-media-driver unrar 7zip 7zip-standalone \
-  libreoffice google-carlito-fonts google-crosextra-caladea-fonts \
-  || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+echo "--> Installing Sway stack, applications, runtimes and dev tools..."
+PKGS=(
+    # Sway stack (idempotent on the spin; ensures Fedora config + companions)
+    sway sway-config-fedora
+    xdg-desktop-portal-wlr xdg-desktop-portal-gtk   # screen share + GTK file pickers
+    cliphist wl-clipboard                            # clipboard history
+    swappy                                         # screenshot annotation
+    pavucontrol                                    # audio GUI (floats by default in Fedora config)
+    kanshi dunst                                    # display hotplug + notifications (spin ships both)
+    # AMD / VCN 1.0 video acceleration (Fedora 44 = Mesa 26: base VA-API lives in
+    # mesa-dri-drivers; freeworld adds H.264/HEVC codecs; libva-utils provides vainfo)
+    mesa-dri-drivers mesa-va-drivers-freeworld libva-utils
+    # Laptop power management (Zen+ has no amd-pstate/PPD support; TLP is the right tool)
+    tlp tlp-rdw
+    # Applications  (no vlc/gstreamer1-plugin-libav in RPM Fusion for F44 yet; mpv
+    # + ffmpeg + the multimedia group cover media playback - see README)
+    firefox mpv gnome-boxes
+    code google-chrome-stable google-cloud-cli
+    libreoffice
+    # Runtimes & build tools (Fedora 44 ships Node.js as versioned packages;
+    # nodejs24 is the current LTS line and bundles npm)
+    @development-tools
+    nodejs24 python3 python3-pip python3-devel distrobox git
+    # Shell
+    zsh zsh-syntax-highlighting zsh-autosuggestions
+    # Desktop plumbing
+    flatpak qt5ct qt6ct
+    cabextract mkfontscale fontconfig
+    7zip 7zip-standalone
+    google-carlito-fonts google-crosextra-caladea-fonts
+)
+if [ "$SCX" = "1" ]; then
+    PKGS+=(scx-scheds scx-tools)
+fi
+dnf install -y "${PKGS[@]}" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+
+# Firmware updates (after base upgrade; needs a quiet moment)
+if command -v fwupdmgr >/dev/null 2>&1; then
+    echo "--> Refreshing firmware metadata and applying pending updates..."
+    fwupdmgr refresh --force || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    fwupdmgr update -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+fi
 
 # ==============================================================================
-# SYSTEM OPTIMIZATIONS (SWAPPINESS & BTRFS)
+# 6. SYSTEM OPTIMIZATIONS
 # ==============================================================================
-echo "--> Configuring VM swappiness, cache pressure, and power-saving sysctls..."
-cat > /etc/sysctl.d/99-swappiness.conf <<'EOF'
+echo "--> Configuring memory/power sysctls..."
+cat > /etc/sysctl.d/99-sway-laptop.conf <<'EOF'
+# Laptop-oriented memory policy
 vm.swappiness = 10
 vm.vfs_cache_pressure = 50
-kernel.nmi_watchdog = 0
+# Reduce writeback frequency (battery; trade-off: slightly more data in flight)
 vm.dirty_writeback_centisecs = 1500
+# NMI watchdog off: saves power, but removes one deadlock detector.
+# Remove this line if you want kernel watchdog reporting.
+kernel.nmi_watchdog = 0
 EOF
-chmod 0644 /etc/sysctl.d/99-swappiness.conf
-sysctl -p /etc/sysctl.d/99-swappiness.conf >/dev/null || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+chmod 0644 /etc/sysctl.d/99-sway-laptop.conf
+sysctl -p /etc/sysctl.d/99-sway-laptop.conf >/dev/null || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
-echo "--> Enabling noatime mount option for Btrfs volumes in /etc/fstab..."
+echo "--> Enabling noatime for Btrfs volumes in /etc/fstab (backup kept)..."
 cp -a /etc/fstab /etc/fstab.bak 2>/dev/null || true
 sed -i '/\sbtrfs\s/{/noatime/!s/\(subvol=[^[:space:],]*\)/\1,noatime/; s/,relatime//}' /etc/fstab
-echo "--> Reloading systemd daemon to refresh mounts..."
 systemctl daemon-reload
-
-echo "--> Remounting root filesystem..."
 mount -o remount / || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+printf '  (verify with: findmnt -no OPTIONS / | tr "," "\\n")\n'
 
 echo "--> Disabling NetworkManager-wait-online.service to speed up boot..."
-systemctl disable NetworkManager-wait-online.service || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+systemctl disable NetworkManager-wait-online.service || true
 
 echo "--> Enabling weekly SSD TRIM timer..."
 systemctl enable fstrim.timer || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-
-echo "--> Enabling Bluetooth battery status reporting..."
-if [ -f /etc/bluetooth/main.conf ]; then
-    if ! grep -q '^Experimental[[:space:]]*=' /etc/bluetooth/main.conf; then
-        if grep -q '^\[Policy\]' /etc/bluetooth/main.conf; then
-            sed -i '/^\[Policy\]/a Experimental=true' /etc/bluetooth/main.conf
-        else
-            printf '\n[Policy]\nExperimental=true\n' >> /etc/bluetooth/main.conf
-        fi
-    fi
-    systemctl restart bluetooth || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-fi
 
 echo "--> Capping systemd journal size to 500MB..."
 mkdir -p /etc/systemd/journald.conf.d
@@ -210,12 +237,16 @@ if [ -f /etc/default/grub ]; then
     else
         echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
     fi
-    # Resolve the real grub.cfg path (BIOS: /etc/grub2.cfg, EFI: /etc/grub2-efi.cfg,
-    # both symlinks to /boot/grub2/grub.cfg on modern Fedora).
     GRUB_CFG=""
-    [ -e /etc/grub2.cfg ] && GRUB_CFG=$(readlink -f /etc/grub2.cfg) || true
-    [ -z "$GRUB_CFG" ] && [ -e /etc/grub2-efi.cfg ] && GRUB_CFG=$(readlink -f /etc/grub2-efi.cfg) || true
-    [ -z "$GRUB_CFG" ] && [ -f /boot/grub2/grub.cfg ] && GRUB_CFG=/boot/grub2/grub.cfg
+    if [ -e /etc/grub2.cfg ]; then
+        GRUB_CFG=$(readlink -f /etc/grub2.cfg) || true
+    fi
+    if [ -z "$GRUB_CFG" ] && [ -e /etc/grub2-efi.cfg ]; then
+        GRUB_CFG=$(readlink -f /etc/grub2-efi.cfg) || true
+    fi
+    if [ -z "$GRUB_CFG" ] && [ -f /boot/grub2/grub.cfg ]; then
+        GRUB_CFG=/boot/grub2/grub.cfg
+    fi
     if [ -n "$GRUB_CFG" ]; then
         grub2-mkconfig -o "$GRUB_CFG" >/dev/null 2>&1 || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
     else
@@ -223,150 +254,176 @@ if [ -f /etc/default/grub ]; then
     fi
 fi
 
-echo "--> Masking unneeded services (ModemManager, cups, abrtd) if present..."
+echo "--> Disabling unneeded services (uninstall-friendly; disable, not mask)..."
 for svc in ModemManager cups abrtd; do
-    systemctl list-unit-files "$svc.service" >/dev/null 2>&1 && systemctl mask --now "$svc.service" >/dev/null 2>&1 || true
+    if systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
+        systemctl disable --now "$svc.service" >/dev/null 2>&1 || true
+    fi
 done
 
-# ==============================================================================
-# GNOME CONFIGURATIONS (SYSTEM-WIDE DEFAULTS)
-# ==============================================================================
-echo "--> Configuring GNOME system-wide defaults (Dark Mode, Window Buttons, Extensions)..."
+echo "--> Enabling TLP (power management; conflicts with power-profiles-daemon - do not install both)..."
+systemctl enable --now tlp tlp-rdw || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
-cat > /usr/share/glib-2.0/schemas/99-fedora-setup.gschema.override <<'EOF'
-[org.gnome.desktop.interface]
-color-scheme='prefer-dark'
-
-[org.gnome.desktop.wm.preferences]
-button-layout='appmenu:minimize,maximize,close'
-
-[org.gnome.shell]
-enabled-extensions=['dash-to-dock@micxgx.gmail.com', 'appindicatorsupport@rgcjonas.gmail.com']
-EOF
-
-echo "--> Compiling GLib schemas..."
-glib-compile-schemas /usr/share/glib-2.0/schemas/ || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-
-echo "--> Disabling GNOME Software autostart and search provider..."
-if [ "$TARGET_USER" != "root" ]; then
-    sudo -u "$TARGET_USER" mkdir -p "$TARGET_HOME/.config/autostart"
-    if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
-        sudo -u "$TARGET_USER" cp /usr/share/applications/org.gnome.Software.desktop "$TARGET_HOME/.config/autostart/"
-        if ! grep -q 'X-GNOME-Autostart-enabled=false' "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" 2>/dev/null; then
-            echo "X-GNOME-Autostart-enabled=false" | sudo -u "$TARGET_USER" tee -a "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop" >/dev/null
-        fi
-    fi
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-fi
-
-echo "--> Applying GNOME desktop polish (battery %, night light, tap-to-click, pinned apps)..."
-if [ "$TARGET_USER" != "root" ]; then
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.interface show-battery-percentage true || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled true || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.shell favorite-apps "['org.gnome.Nautilus.desktop', 'google-chrome.desktop', 'code.desktop']" || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+if [ "$SCX" = "1" ]; then
+    echo "--> Configuring sched-ext (SCX) to use scx_bpfland..."
+    mkdir -p /etc/default
+    echo "SCX_SCHEDULER=scx_bpfland" > /etc/default/scx
+    systemctl enable --now scx_loader 2>/dev/null || systemctl enable --now scx || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    echo "  (verify: systemctl status scx_loader --no-pager | head -5)"
 fi
 
 # ==============================================================================
-# PERFORMANCE SCHEDULER & FLATPAK
+# 7. FLATPAK (Flathub; drop the stock Fedora remote)
 # ==============================================================================
-echo "--> Configuring sched-ext (SCX) to use scx_bpfland..."
-mkdir -p /etc/default
-echo "SCX_SCHEDULER=scx_bpfland" > /etc/default/scx
-
-echo "--> Enabling and starting sched-ext (SCX) service..."
-systemctl enable --now scx_loader || systemctl enable --now scx || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
-
-echo "--> Setting up Flatpaks (Flathub repo + update)..."
+echo "--> Setting up Flatpak: Flathub repo..."
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 if flatpak remote-list | grep -q '^fedora'; then
     flatpak remote-delete fedora || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 fi
+echo "--> Updating installed Flatpaks..."
 flatpak update -y || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
-# LIBREOFFICE MICROSOFT COMPATIBILITY CONFIGURATION
+# 8. GTK / QT THEMING (applies to apps under Sway; does not touch the WM)
 # ==============================================================================
-echo "--> Setting up LibreOffice Microsoft Office compatibility defaults..."
+echo "--> Setting system-wide GTK defaults (dark mode, window buttons)..."
+cat > /usr/share/glib-2.0/schemas/99-sway.gschema.override <<'EOF'
+[org.gnome.desktop.interface]
+color-scheme='prefer-dark'
+gtk-theme='Adwaita-dark'
 
-REGISTRY_DIR=""
-for dir in /usr/lib64/libreoffice/share/registry /usr/share/libreoffice/share/registry /usr/lib/libreoffice/share/registry; do
-    if [ -d "$dir" ]; then
-        REGISTRY_DIR="$dir"
-        break
+[org.gnome.desktop.wm.preferences]
+button-layout='appmenu:minimize,maximize,close'
+EOF
+glib-compile-schemas /usr/share/glib-2.0/schemas/ || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+
+# ==============================================================================
+# 9. SWAY USER CONFIGURATION
+#    The Fedora spin loads /usr/share/sway/config.d, /etc/sway/config.d and
+#    ~/.config/sway/config.d (later dirs win). We only ADD files and never
+#    overwrite - so your later manual edits are safe.
+# ==============================================================================
+if [ "$TARGET_USER" != "root" ]; then
+    SWAY_UD="$TARGET_HOME/.config/sway/config.d"
+    mkdir -p "$SWAY_UD" "$TARGET_HOME/.config/kanshi" "$TARGET_HOME/.local/bin"
+    chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config/sway" "$TARGET_HOME/.config/kanshi" "$TARGET_HOME/.local/bin"
+
+    # -- Touchpad / input (Sway reads libinput directly - gsettings does NOT apply)
+    if [ ! -e "$SWAY_UD/10-usr-input.conf" ]; then
+        cat > "$SWAY_UD/10-usr-input.conf" <<'SWAYEOF'
+# Input tweaks (written by fedora-setup; edit freely, reload with $mod+Shift+c)
+#
+# Find your device names:  swaymsg -t get_inputs
+input "type:touchpad" {
+    tap enabled
+    natural_scroll enabled
+    middle_emulation enabled
+    dwt enabled
+}
+# Optional: swap Caps Lock for Esc (vim-friendly)
+# input "type:keyboard" { xkb_options caps:escape }
+SWAYEOF
+        echo "--> Wrote $SWAY_UD/10-usr-input.conf"
     fi
-done
 
-if [ -n "$REGISTRY_DIR" ]; then
-    cat > "$REGISTRY_DIR/microsoft-compatibility.xcd" <<'XCD'
-<?xml version="1.0" encoding="UTF-8"?>
-<oor:data xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <dependency file="main"/>
-  <oor:component-data oor:name="Setup" oor:package="org.openoffice">
-    <node oor:name="Office">
-      <node oor:name="Factories">
-        <node oor:name="org.openoffice.Setup:Factory['com.sun.star.text.TextDocument']">
-          <prop oor:name="ooSetupFactoryDefaultFilter" oor:op="fuse">
-            <value>MS Word 2007 XML</value>
-          </prop>
-        </node>
-        <node oor:name="org.openoffice.Setup:Factory['com.sun.star.sheet.SpreadsheetDocument']">
-          <prop oor:name="ooSetupFactoryDefaultFilter" oor:op="fuse">
-            <value>MS Excel 2007 XML</value>
-          </prop>
-        </node>
-        <node oor:name="org.openoffice.Setup:Factory['com.sun.star.presentation.PresentationDocument']">
-          <prop oor:name="ooSetupFactoryDefaultFilter" oor:op="fuse">
-            <value>MS PowerPoint 2007 XML</value>
-          </prop>
-        </node>
-      </node>
-    </node>
-  </oor:component-data>
-</oor:data>
-XCD
-    echo "Created global LibreOffice compatibility overrides at: $REGISTRY_DIR/microsoft-compatibility.xcd"
-else
-    echo "Warning: Could not find LibreOffice share/registry directory."
+    # -- Clipboard history, screenshot annotation, kanshi autostart
+    if [ ! -e "$SWAY_UD/40-usr-tools.conf" ]; then
+        cat > "$SWAY_UD/40-usr-tools.conf" <<'SWAYEOF'
+# Clipboard & tools (written by fedora-setup; edit freely, reload with $mod+Shift+c)
+#
+# Clipboard history via rofi: pick an entry, paste with Ctrl+V / $mod+Shift+v again
+bindsym $mod+Shift+v exec --no-startup-id sh -c 'cliphist list | rofi -dmenu | cliphist decode | wl-copy'
+
+# Annotate a selected area with swappy (swap=tmpfile because swappy cannot read stdin)
+bindsym $mod+Shift+Print exec --no-startup-id sh -c 'tmp=$(mktemp --suffix=.png) && grim -g "$(slurp)" - > "$tmp" && swappy -f "$tmp"'
+
+# Dynamic display profiles (kanshi). Remove this line if kanshi is already
+# started by your session (e.g. via a systemd --user service).
+exec kanshi
+SWAYEOF
+        echo "--> Wrote $SWAY_UD/40-usr-tools.conf"
+    fi
+
+    # -- Environment for apps spawned by Sway (was sourced by spin's start-sway)
+    if [ ! -e "$TARGET_HOME/.config/sway/environment" ]; then
+        cat > "$TARGET_HOME/.config/sway/environment" <<'SWAYEOF'
+# App environment written by fedora-setup; edit freely.
+# Electron apps (VS Code, Discord, Slack, Obsidian...) -> native Wayland
+ELECTRON_OZONE_PLATFORM_HINT=auto
+# Qt theming through qt6ct / qt5ct
+QT_QPA_PLATFORMTHEME=qt6ct
+SWAYEOF
+        echo "--> Wrote $TARGET_HOME/.config/sway/environment"
+    fi
+
+    # -- kanshi profile template (write-once; adjust output names per your hardware)
+    if [ ! -e "$TARGET_HOME/.config/kanshi/config" ]; then
+        cat > "$TARGET_HOME/.config/kanshi/config" <<'SWAYEOF'
+# Profile template (written by fedora-setup; edit freely).
+# Find your output names:  swaymsg -t get_outputs
+profile builtin {
+    output eDP-1 enable
+}
+
+# Example for an external monitor over HDMI - uncomment after checking names:
+# profile dock {
+#     output eDP-1 enable
+#     output HDMI-A-1 enable position 1920,0
+# }
+SWAYEOF
+        echo "--> Wrote $TARGET_HOME/.config/kanshi/config"
+    fi
+
+    chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config/sway" "$TARGET_HOME/.config/kanshi" "$TARGET_HOME/.local/bin"
 fi
 
 # ==============================================================================
-# FONTS (NERD FONTS & MICROSOFT CORE FONTS)
+# 10. FONTS
 # ==============================================================================
 if [ "$TARGET_USER" != "root" ]; then
-    echo "--> Creating local fonts directory..."
+    echo "--> Creating local fonts directory and installing Fira Code Nerd Font..."
     FONT_DIR="$TARGET_HOME/.local/share/fonts"
     mkdir -p "$FONT_DIR"
     chown "$TARGET_USER":"$TARGET_GROUP" "$FONT_DIR"
     chmod 0755 "$FONT_DIR"
-
-    if ! ls "$FONT_DIR"/*.ttf >/dev/null 2>&1; then
-        echo "--> Downloading and extracting Fira Code Nerd Font..."
-        sudo -u "$TARGET_USER" curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz
-        sudo -u "$TARGET_USER" tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR"
-        rm -f "$TARGET_HOME/FiraCode.tar.xz"
+    if ! compgen -G "$FONT_DIR/FiraCode*.ttf" >/dev/null 2>&1; then
+        sudo -u "$TARGET_USER" curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+        if [ -f "$TARGET_HOME/FiraCode.tar.xz" ]; then
+            sudo -u "$TARGET_USER" tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR"
+            rm -f "$TARGET_HOME/FiraCode.tar.xz"
+        fi
     fi
 fi
 
-echo "--> Installing Microsoft Core Fonts installer..."
-if ! rpm -q msttcore-fonts-installer >/dev/null 2>&1; then
-    rpm -i --nodeps --nodigest https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+if [ "$MS_CORE_FONTS" = "1" ]; then
+    echo "--> Installing Microsoft Core Fonts (optional, flag MS_CORE_FONTS=1)..."
+    MSRPM="/tmp/msttcore-fonts-installer-2.6-1.noarch.rpm"
+    curl -fsSL -o "$MSRPM" https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    if [ -f "$MSRPM" ]; then
+        # Third-party RPM; no trustworthy signature - reviewed & accepted by flag.
+        rpm -i "$MSRPM" 2>/dev/null || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    fi
+else
+    echo "--> Skipping MS core fonts (set MS_CORE_FONTS=1 to enable). Carlito/Caladea metric-compatible fonts were installed."
 fi
 
 echo "--> Rebuilding font cache..."
 fc-cache -f || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
 # ==============================================================================
-# NODE.JS TOOLCHAIN
+# 11. NODE TOOLCHAIN (as the user - never as root, so upgrades need no sudo)
 # ==============================================================================
-echo "--> Installing TypeScript, its language server, and Reasonix CLI..."
-npm install -g typescript typescript-language-server reasonix || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+if command -v npm >/dev/null 2>&1; then
+    echo "--> Installing TypeScript, its language server and Reasonix CLI (user-level)..."
+    sudo -u "$TARGET_USER" npm install -g typescript typescript-language-server reasonix || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
+    echo "  (binaries land in ~/.local/bin, already on PATH via the zsh block below)"
+fi
 
 # ==============================================================================
-# SHELL & USABILITY POLISH
+# 12. SHELL & USABILITY POLISH
 # ==============================================================================
 if [ "$TARGET_USER" != "root" ]; then
-    echo "--> Changing user shell to Zsh..."
+    echo "--> Changing default shell to Zsh..."
     usermod -s /bin/zsh "$TARGET_USER"
 
     echo "--> Configuring Zsh options and plugins in .zshrc..."
@@ -375,14 +432,17 @@ if [ "$TARGET_USER" != "root" ]; then
         cat >> "$ZSHRC_FILE" <<'ZSHBLOCK'
 
 # BEGIN SETUP BLOCKS
-# Initialize Starship Prompt
-eval "$(starship init zsh)"
+# Initialize Starship Prompt if installed (not packaged in Fedora 41+; if you
+# want it: install via cargo, or replace with a plain prompt)
+if command -v starship >/dev/null 2>&1; then
+    eval "$(starship init zsh)"
+fi
 
 # Enable syntax highlighting and autosuggestions from DNF packages
 source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
-# Ensure local bin is in PATH
+# Ensure local bin is in PATH (npm user-level packages, scripts)
 export PATH="$HOME/.local/bin:$PATH"
 
 # Sane Zsh options
@@ -402,27 +462,43 @@ echo "Defaults pwfeedback" > /etc/sudoers.d/pwfeedback
 chmod 0440 /etc/sudoers.d/pwfeedback
 
 # ==============================================================================
-# DNS (SYSTEMD-RESOLVED) — DONE LAST SO A NETWORK RESTART CANNOT INTERRUPT EARLIER STEPS
+# 13. DNS (SYSTEMD-RESOLVED) - LAST, SO A NETWORK RESTART CANNOT INTERRUPT EARLIER STEPS
 # ==============================================================================
-echo "--> Configuring systemd-resolved DNS (Cloudflare 1.1.1.1/1.0.0.1, fallback Google 8.8.8.8)..."
+echo "--> Configuring systemd-resolved (Cloudflare primary, Google fallback)..."
 mkdir -p /etc/systemd/resolved.conf.d
-cat > /etc/systemd/resolved.conf.d/99-dns.conf <<'EOF'
-[Resolve]
-DNS=1.1.1.1 1.0.0.1
-FallbackDNS=8.8.8.8
-DNSOverTLS=yes
-EOF
+{
+    printf '[Resolve]\nDNS=1.1.1.1 1.0.0.1\nFallbackDNS=8.8.8.8\n'
+    if [ "$DNS_OVER_TLS" = "1" ]; then
+        printf 'DNSOverTLS=yes\n'
+    fi
+} > /etc/systemd/resolved.conf.d/99-dns.conf
 systemctl enable --now systemd-resolved || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 mkdir -p /etc/NetworkManager/conf.d
 printf '[main]\ndns=systemd-resolved\n' > /etc/NetworkManager/conf.d/99-systemd-resolved.conf
 systemctl restart NetworkManager || { FAILURES=$((FAILURES+1)); echo "  !! FAILED - see above"; }
 
+# ==============================================================================
+# SUMMARY
+# ==============================================================================
 if [ "$FAILURES" -gt 0 ]; then
+    echo ""
+    echo "=============================================================================="
     echo "Setup finished with $FAILURES failed step(s) - look for '!!' markers above."
     echo "=============================================================================="
 else
-    echo "Setup complete! Please restart your system or log out and back in to apply all updates."
+    echo ""
+    echo "=============================================================================="
+    echo "Setup complete! Reboot, then log in to the Sway session."
+    echo ""
+    echo "Quick checks inside Sway:"
+    echo "  swaymsg -t get_outputs        # display names/resolution"
+    echo "  swaymsg -t get_inputs         # devices (tap/natural scroll already set)"
+    echo "  systemctl status tlp --no-pager | head -3"
+    echo "  vainfo                        # VCN 1.0 decode should enumerate"
+    echo "  systemctl status scx_loader --no-pager | head -3   (only with SCX=1)"
+    echo ""
+    echo "If notifications never appear: systemctl --user enable --now dunst"
     echo "=============================================================================="
 fi
 }

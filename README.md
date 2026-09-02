@@ -1,93 +1,99 @@
-# Fedora Post-Install Setup
+# Fedora Sway Spin - Post-Install Setup (F44+)
 
-This repository contains a unified, zero-dependency Bash script designed to automate post-installation configuration, system optimization, package management, and custom desktop/terminal modifications on a fresh installation of **Fedora Linux**.
+A from-scratch, Sway-first bootstrap for a **fresh Fedora 44+ Sway spin** install.
+Written for a tiling-WM beginner coming from GNOME, on AMD APU laptops
+(amdgpu/Vega, VCN video block) — but harmless on Intel/desktops.
 
-By running this script, you can quickly bootstrap your Fedora desktop into a fully configured, high-performance development workstation.
+It deliberately does **not** touch GNOME Shell, install GNOME extensions, or apply
+GNOME-specific settings that Sway ignores.
 
----
+## Usage
 
-## 🚀 Quick-Start One-Liner
-
-On a fresh Fedora installation, open your terminal and run the following command to initiate the entire setup automatically:
+The script changes system files, installs third-party repos and runs `dnf` —
+**read it first, then run it locally** (never `curl | sudo bash`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/roguehunter7/fedora-setup/main/setup.sh | sudo bash
-```
-
-This single command fetches the setup script directly and executes it with root privileges to configure your system.
-
----
-
-## What this Script Does
-
-The steps run in the order listed below.
-
-1. **DNF Speed Optimizations**: Configures `max_parallel_downloads=20` and `defaultyes=True` for both DNF and DNF5 to make package updates much faster.
-2. **App Cleanup (Removal)**: Uninstalls the default **Firefox** browser (Chrome is the preferred browser).
-3. **System-wide Package Upgrade + Firmware**: Upgrades all pre-installed system packages to their latest versions (including the **core package group**), then refreshes LVFS metadata and installs pending device firmware updates via `fwupdmgr`.
-4. **Repository Configuration**:
-   - Enables **RPM Fusion (Free & Non-Free)** repositories.
-   - Enables the **Terra Repository** (maintained by Fyra Labs).
-   - Configures the official repositories for **Visual Studio Code**, **Google Chrome**, and the **Google Cloud CLI** (architecture-aware via `$basearch`).
-   - Enables the **CachyOS COPR** repository for sched-ext.
-   - Disables unused, limited third-party repositories (**NVIDIA** and **Steam** subsets) to prevent DNF metadata bloat on AMD hardware.
-5. **Multimedia Swap & Video Acceleration**:
-   - Swaps out Fedora's restricted `ffmpeg-free` for full `ffmpeg` from RPM Fusion.
-   - Installs the `@multimedia` package group.
-   - Installs hardware-accelerated video decoding drivers (`mesa-va-drivers-freeworld` and `intel-media-driver`).
-6. **Consolidated Package Installation**: Installs all application, runtime, and development packages in a **single DNF transaction**:
-   - **Applications**: VLC, GNOME Boxes, Google Chrome, Visual Studio Code, LibreOffice.
-   - **Runtimes & Build Tools**: Python 3 (with pip and dev headers), Node.js, and the Fedora **Development Tools** group.
-   - **Container tools**: Distrobox.
-   - **System tools**: flatpak, cabextract, mkfontscale, fontconfig, plus archive support (`unrar`, `7zip`, `7zip-standalone`).
-7. **General Linux & Storage Optimizations**:
-   - **Memory Tuning**: Configures `vm.swappiness = 10`, `vm.vfs_cache_pressure = 50`, `kernel.nmi_watchdog = 0` (disables NMI watchdog), and `vm.dirty_writeback_centisecs = 1500` via a custom sysctl drop-in file (`/etc/sysctl.d/99-swappiness.conf`).
-   - **Btrfs Performance Tuning**: Safely updates `/etc/fstab` to append the `noatime` option to Btrfs subvolumes, reducing write amplification on SSDs/NVMes, then remounts the root filesystem.
-   - **Bluetooth Battery Reporting**: Enables BlueZ experimental features to show battery levels for connected Bluetooth devices in the GNOME Quick Settings.
-   - **SSD TRIM & Lifespan**: Activates the weekly `fstrim.timer`.
-   - **Boot Speed**: Disables `NetworkManager-wait-online.service` (saves seconds on boot), caps the systemd journal at 500MB, reduces the GRUB timeout to 2 seconds, and masks unneeded services (`ModemManager`, `cups`, `abrtd`) when present.
-8. **GNOME Customization & Desktop Tweaks**:
-   - Installs **GNOME Tweaks** and the graphical **GNOME Extensions App**.
-   - Installs and enables the **Dash to Dock** and **AppIndicator** extensions.
-   - Configures window controls to **enable Minimize and Maximize buttons**.
-   - Sets the global system color scheme preference to **Dark Mode**.
-   - Applies desktop polish via gsettings: battery percentage, night light, tap-to-click, and pinned favorite apps (Files, Chrome, VS Code).
-   - Disables **GNOME Software** autostart and its search provider to save memory.
-9. **Performance Scheduler (sched-ext)**: Installs **SCX** from the CachyOS COPR and configures the system to use the **`scx_bpfland`** scheduler (pure-BPF, battery-friendly — ideal for laptops) for desktop responsiveness.
-10. **Flatpak Integration**: Registers **Flathub**, removes the Fedora Flatpak remote, and updates installed Flatpaks.
-11. **LibreOffice Microsoft Compatibility**: Configures LibreOffice to default to saving in Microsoft Office XML formats (DOCX, XLSX, PPTX) via a global registry override.
-12. **Font Polish (Nerd Fonts & Microsoft Fonts)**:
-    - Downloads and extracts the **Fira Code Nerd Font** into the user's local fonts directory.
-    - Installs the **Microsoft TrueType Core Fonts** installer, plus metric-compatible **Carlito** and **Caladea** fonts.
-    - Rebuilds the system font cache.
-13. **Dev Toolchains & Language Servers**:
-    - **TypeScript** and the **TypeScript language server** via npm.
-    - **Reasonix** (terminal coding agent) via npm.
-14. **Usability & Shell Customization (Zsh)**:
-    - Installs **Zsh** and the official plugins **zsh-syntax-highlighting** and **zsh-autosuggestions**.
-    - Sets the default shell to **Zsh**.
-    - Configures `~/.zshrc` to initialize the **Starship** prompt and put local binaries (`~/.local/bin`) on `PATH`.
-    - Enables **Sudo Password Feedback** (shows asterisks as you type passwords).
-15. **DNS**: Enables `systemd-resolved` with Cloudflare **1.1.1.1 / 1.0.0.1**, falling back to Google **8.8.8.8**, with **DNS over TLS** — run last so the network restart cannot interrupt earlier steps.
-
----
-
-## Alternative Execution (Manual)
-
-If you prefer to download and run the script manually:
-
-### Step 1: Clone the Repository
-```bash
-git clone https://github.com/roguehunter7/fedora-setup.git
-cd fedora-setup
-```
-
-### Step 2: Make the Script Executable
-```bash
-chmod +x setup.sh
-```
-
-### Step 3: Run the Script
-```bash
+git clone <this-repo> && cd fedora-setup
 sudo ./setup.sh
 ```
+
+Optional flags:
+
+```bash
+SCX=1 sudo ./setup.sh            # sched-ext (scx_bpfland) from CachyOS COPR
+MS_CORE_FONTS=1 sudo ./setup.sh  # MS core fonts (third-party RPM)
+DNS_OVER_TLS=1 sudo ./setup.sh   # DNS-over-TLS for resolved
+```
+
+## What it does (in order)
+
+1. **DNF tuning** — `max_parallel_downloads=20`, `defaultyes=True` (both dnf/dnf5 configs).
+2. **Base upgrade** — full `dnf upgrade` + `core` group, official repos only.
+3. **Repositories** — RPM Fusion free/nonfree; VS Code, Chrome, Google Cloud CLI
+   (first-party); CachyOS COPR only behind a flag; unused Workstation NVIDIA/Steam
+   repos disabled on AMD. (No Terra/unrar — RAR isn't needed day-to-day; see notes.)
+4. **Multimedia swap** — full `ffmpeg` + `@multimedia` group from RPM Fusion.
+5. **Consolidated install (one transaction)** —
+   - **Sway stack** (idempotent on the spin): `sway-config-fedora`, portals
+     (`xdg-desktop-portal-wlr` + GTK — screen sharing & file dialogs),
+     `cliphist`/`wl-clipboard`, `swappy`, `pavucontrol`, `kanshi`, `dunst`
+   - **AMD acceleration**: `mesa-dri-drivers` + `mesa-va-drivers-freeworld` (Fedora 44
+     is Mesa 26 — the base VA-API driver now lives in `mesa-dri-drivers`; freeworld adds
+     the H.264/HEVC codecs; `libva-utils` gives you `vainfo`) for VCN decode
+   - **Power**: `tlp` + `tlp-rdw` (right choice for Zen+/Picasso — this APU has no
+     power-profiles-daemon support)
+   - Apps: Firefox (kept — the spin's Wayland-native default), **mpv** (RPM Fusion's
+     `vlc` and `gstreamer1-plugin-libav` are not built for F44 yet — install VLC later
+     via `flatpak install flathub org.videolan.VLC` or when RPM Fusion ships it), GNOME Boxes,
+     VS Code, Chrome, LibreOffice + Carlito/Caladea, Distrobox, git, dev toolchain, Zsh
+     (Node.js in F44 is the versioned `nodejs24`; Starship is not packaged in Fedora 41+
+     — the zshrc block tolerates its absence)
+6. **System tweaks** — laptop sysctls, Btrfs `noatime` (backup kept), fstrim timer,
+   journal cap, GRUB timeout 2s, `NetworkManager-wait-online` off, unneeded services
+   disabled (not masked), fwupd firmware update.
+7. **Flatpak** — Flathub added, Fedora remote removed.
+8. **GTK/Qt theming** — dark mode + window buttons via gschema override; `qt6ct`/`qt5ct`.
+9. **Sway user config** (write-once, never overwrites your edits) —
+   - `~/.config/sway/config.d/10-usr-input.conf` — touchpad tap, natural scroll,
+     middle-emo, dwt (Sway reads libinput; GNOME gsettings do **not** apply)
+   - `~/.config/sway/config.d/40-usr-tools.conf` — clipboard history picker
+     (`$mod+Shift+v`), swappy annotate (`$mod+Shift+Print`), `exec kanshi`
+   - `~/.config/sway/environment` — `ELECTRON_OZONE_PLATFORM_HINT=auto` (native
+     Wayland for VS Code/Discord/Slack/Obsidian), `QT_QPA_PLATFORMTHEME=qt6ct`
+   - `~/.config/kanshi/config` — display-profile template
+10. **Fonts** — Fira Code Nerd Font (user-local), Carlito/Caladea, optional MS core fonts.
+11. **Node toolchain** — TypeScript, `typescript-language-server`, Reasonix CLI
+    **as the user** (installs into `~/.local/bin`, no root-owned system globals).
+12. **Shell** — Zsh default + syntax-highlighting/autosuggestions/Starship, sudo
+    password feedback.
+13. **DNS** — systemd-resolved with Cloudflare/Google, optional DoT — run **last**
+    so the network restart can't interrupt earlier steps.
+
+## Notes for the 3500U / AMD laptop
+
+- VCN 1.0 decodes H.264/HEVC/VP9 in hardware; **AV1 is software-decoded** on this
+  GPU generation — fine at 1080p in Firefox.
+- TLP vs power-profiles-daemon: install only TLP (PPD has no profiles for Zen+).
+- WiFi on these boards is often Realtek RTL8821CE — supported in-tree
+  (`rtw88_8821ce`) on current Fedora kernels, no DKMS needed.
+- Chrome on Wayland: the script sets Electron's ozone hint, but Chrome needs its
+  own flag — edit `/usr/share/applications/google-chrome.desktop` `Exec=` to add
+  `--ozone-platform-hint=auto`, or run `google-chrome --ozone-platform-hint=auto`.
+- **RAR archives**: Fedora's `7zip` ships with RAR support disabled (license), and
+  `unrar` lives only in third-party repos — so if you ever receive a `.rar`, install
+  `unar` from the **official** Fedora repos: `sudo dnf install unar` (extracts
+  RAR4/RAR5). No repo or flag needed.
+
+## Post-run
+
+Reboot, pick the **Sway** session, then verify:
+
+```bash
+swaymsg -t get_outputs     # display names/resolution (used by kanshi profiles)
+swaymsg -t get_inputs      # touchpad tap/natural scroll active
+vainfo                     # VCN 1.0 enumeration
+systemctl status tlp --no-pager | head -3
+```
+
+If notifications never appear: `systemctl --user enable --now dunst` (dunst is
+D-Bus-activatable in the spin; one-time nudge sometimes needed).
