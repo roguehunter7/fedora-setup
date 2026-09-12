@@ -1,11 +1,10 @@
-# Fedora Sway Spin - Post-Install Setup (F44+)
+# Fedora Workstation (GNOME) - Post-Install Setup
 
-A from-scratch, Sway-first bootstrap for a **fresh Fedora 44+ Sway spin** install.
-Written for a tiling-WM beginner coming from GNOME, on AMD APU laptops
-(amdgpu/Vega, VCN video block) — but harmless on Intel/desktops.
-
-It deliberately does **not** touch GNOME Shell, install GNOME extensions, or apply
-GNOME-specific settings that Sway ignores.
+A from-scratch bootstrap for a **fresh Fedora Workstation (GNOME Wayland)**
+install on an AMD Ryzen/Picasso laptop (amdgpu, Vega 8, VCN). It sets up a
+Bash + Readline shell with Starship and FZF, installs **Brave Origin** as the
+native RPM browser, and manages Node.js through **fnm** (no system Node, no
+global npm crud).
 
 ## Usage
 
@@ -17,83 +16,64 @@ git clone <this-repo> && cd fedora-setup
 sudo ./setup.sh
 ```
 
-Optional flags:
-
-```bash
-SCX=1 sudo ./setup.sh            # sched-ext (scx_bpfland) from CachyOS COPR
-MS_CORE_FONTS=1 sudo ./setup.sh  # MS core fonts (third-party RPM)
-DNS_OVER_TLS=1 sudo ./setup.sh   # DNS-over-TLS for resolved
-```
+If the executable bit is not set, run `sudo bash setup.sh` (or
+`chmod +x setup.sh` first).
 
 ## What it does (in order)
 
-1. **DNF tuning** — `max_parallel_downloads=20`, `defaultyes=True` (both dnf/dnf5 configs).
-2. **Base upgrade** — full `dnf upgrade` + `core` group, official repos only.
-3. **Repositories** — RPM Fusion free/nonfree; VS Code, Chrome, Google Cloud CLI
-   (first-party); CachyOS COPR only behind a flag; unused Workstation NVIDIA/Steam
-   repos disabled on AMD. (No Terra/unrar — RAR isn't needed day-to-day; see notes.)
-4. **Multimedia swap** — full `ffmpeg` + `@multimedia` group from RPM Fusion.
-5. **Consolidated install (one transaction)** —
-   - **Sway stack** (idempotent on the spin): `sway-config-fedora`, portals
-     (`xdg-desktop-portal-wlr` + GTK — screen sharing & file dialogs),
-     `cliphist`/`wl-clipboard`, `swappy`, `pavucontrol`, `kanshi`, `dunst`
-   - **AMD acceleration**: `mesa-dri-drivers` + `mesa-va-drivers-freeworld` (Fedora 44
-     is Mesa 26 — the base VA-API driver now lives in `mesa-dri-drivers`; freeworld adds
-     the H.264/HEVC codecs; `libva-utils` gives you `vainfo`) for VCN decode
-   - **Power**: `tlp` + `tlp-rdw` (right choice for Zen+/Picasso — this APU has no
-     power-profiles-daemon support)
-   - Apps: Firefox (kept — the spin's Wayland-native default), **mpv** (RPM Fusion's
-     `vlc` and `gstreamer1-plugin-libav` are not built for F44 yet — install VLC later
-     via `flatpak install flathub org.videolan.VLC` or when RPM Fusion ships it), GNOME Boxes,
-     VS Code, Chrome, LibreOffice + Carlito/Caladea, Distrobox, git, dev toolchain, Zsh
-     (Node.js in F44 is the versioned `nodejs24`; Starship is not packaged in Fedora 41+
-     — the zshrc block tolerates its absence)
-6. **System tweaks** — laptop sysctls, Btrfs `noatime` (backup kept), fstrim timer,
-   journal cap, GRUB timeout 2s, `NetworkManager-wait-online` off, unneeded services
-   disabled (not masked), fwupd firmware update.
-7. **Flatpak** — Flathub added, Fedora remote removed.
-8. **GTK/Qt theming** — dark mode + window buttons via gschema override; `qt6ct`/`qt5ct`.
-9. **Sway user config** (write-once, never overwrites your edits) —
-   - `~/.config/sway/config.d/10-usr-input.conf` — touchpad tap, natural scroll,
-     middle-emo, dwt (Sway reads libinput; GNOME gsettings do **not** apply)
-   - `~/.config/sway/config.d/40-usr-tools.conf` — clipboard history picker
-     (`$mod+Shift+v`), swappy annotate (`$mod+Shift+Print`), `exec kanshi`
-   - `~/.config/sway/environment` — `ELECTRON_OZONE_PLATFORM_HINT=auto` (native
-     Wayland for VS Code/Discord/Slack/Obsidian), `QT_QPA_PLATFORMTHEME=qt6ct`
-   - `~/.config/kanshi/config` — display-profile template
-10. **Fonts** — Fira Code Nerd Font (user-local), Carlito/Caladea, optional MS core fonts.
-11. **Node toolchain** — TypeScript, `typescript-language-server`, Reasonix CLI
-    **as the user** (installs into `~/.local/bin`, no root-owned system globals).
-12. **Shell** — Zsh default + syntax-highlighting/autosuggestions/Starship, sudo
-    password feedback.
-13. **DNS** — systemd-resolved with Cloudflare/Google, optional DoT — run **last**
-    so the network restart can't interrupt earlier steps.
+1. **DNF speedup** — drop-in `/etc/dnf/libdnf5.conf.d/80-parallel-downloads.conf`
+   with `max_parallel_downloads = 10`.
+2. **Base upgrade** — full `dnf upgrade --refresh`.
+3. **Repositories** — RPM Fusion free/nonfree; Brave Browser, VS Code and Google
+   Cloud CLI (first-party vendor repos); duplicate Workstation NVIDIA/Steam
+   sections disabled.
+4. **Multimedia** — swap `ffmpeg-free` for full `ffmpeg`, install the
+   RPM Fusion `multimedia` group.
+5. **Core packages** — removes stock Firefox; installs Brave Origin, AMD VA-API
+   acceleration (`mesa-dri-drivers`, `mesa-va-drivers-freeworld`,
+   `libva-utils`), apps (mpv, GNOME Boxes, VS Code, GCLI, LibreOffice),
+   dev tools, shell utilities (`fzf`, `bash-completion`), archivers/fonts,
+   and Flatpak. Firmware updates via `fwupdmgr`.
+6. **System tuning** — weekly SSD TRIM timer, disable
+   `NetworkManager-wait-online`, 500M journal cap, GRUB timeout 2s, and
+   disable ModemManager/cups/abrtd (disable, not mask).
+7. **Flatpak** — add Flathub, remove the stock Fedora remote, update.
+8. **Shell ergonomics** — Install Starship; write `~/.inputrc` (Tab
+   menu-complete, Shift-Tab reverse, prefix history search) and a marked
+   `~/.bashrc` block (autocd, globstar, cdspell, history, `~/.local/bin`,
+   fnm, fzf, Starship). Write-once: later manual edits are preserved.
+9. **Node via fnm** — install Fast Node Manager as the user, then the latest
+   Node.js release set as default. Nothing is installed globally as root.
+10. **GNOME** — prefer-dark color scheme; disable the GNOME Software autostart
+    entry and its search provider.
+11. **Fonts** — Fira Code Nerd Font (user-local), Microsoft Core Fonts, then
+    `fc-cache -f`.
+12. **Usability** — sudo password feedback (`pwfeedback`).
+13. **DNS** — systemd-resolved with Cloudflare/Google and strict DNS-over-TLS;
+    NetworkManager configured to use `systemd-resolved`.
 
-## Notes for the 3500U / AMD laptop
+## Notes / things to review before running
 
-- VCN 1.0 decodes H.264/HEVC/VP9 in hardware; **AV1 is software-decoded** on this
-  GPU generation — fine at 1080p in Firefox.
-- TLP vs power-profiles-daemon: install only TLP (PPD has no profiles for Zen+).
-- WiFi on these boards is often Realtek RTL8821CE — supported in-tree
-  (`rtw88_8821ce`) on current Fedora kernels, no DKMS needed.
-- Chrome on Wayland: the script sets Electron's ozone hint, but Chrome needs its
-  own flag — edit `/usr/share/applications/google-chrome.desktop` `Exec=` to add
-  `--ozone-platform-hint=auto`, or run `google-chrome --ozone-platform-hint=auto`.
-- **RAR archives**: Fedora's `7zip` ships with RAR support disabled (license), and
-  `unrar` lives only in third-party repos — so if you ever receive a `.rar`, install
-  `unar` from the **official** Fedora repos: `sudo dnf install unar` (extracts
-  RAR4/RAR5). No repo or flag needed.
+- **Piped installers**: Starship and fnm are installed by piping upstream
+  `curl ... | sh` scripts to a shell. Review or pin them if that matters to you.
+- **Microsoft Core Fonts** are installed unconditionally from a third-party
+  SourceForge RPM with no signature verification, and `rpm -i` errors are
+  suppressed. The metric-compatible Carlito/Caladea fonts cover LibreOffice;
+  drop this step if you do not need the real MS fonts.
+- **DNS-over-TLS is forced on** (`DNSOverTLS=yes`) with `#hostname` servers. Networks
+  that block port 853 (some captive portals and corporate networks) will break
+  name resolution. Relax it if you roam.
+- There are no opt-out flags in this revision; every step runs. Comment out or
+  gate steps in the script itself if you don't want them.
 
 ## Post-run
 
-Reboot, pick the **Sway** session, then verify:
+Reboot, log in to GNOME, then verify:
 
 ```bash
-swaymsg -t get_outputs     # display names/resolution (used by kanshi profiles)
-swaymsg -t get_inputs      # touchpad tap/natural scroll active
-vainfo                     # VCN 1.0 enumeration
-systemctl status tlp --no-pager | head -3
+node -v            # active Node from fnm
+npm -v             # bundled npm
+brave-origin       # launch the browser
+vainfo             # AMD VCN video decode (H.264/HEVC)
+powerprofilesctl   # GNOME power profiles daemon
 ```
-
-If notifications never appear: `systemctl --user enable --now dunst` (dunst is
-D-Bus-activatable in the spin; one-time nudge sometimes needed).
