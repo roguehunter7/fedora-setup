@@ -6,7 +6,7 @@
 # Hardware : AMD Ryzen/Picasso laptop (amdgpu, Vega 8, VCN)
 # Shell    : Bash + Readline completion polish + Starship + FZF
 # Browser  : Brave Origin (native RPM with PWAs + Widevine DRM, no AI/Crypto)
-# Node     : Fast Node Manager (fnm) -> Latest Node.js & npm (clean, use npx)
+# Node     : Fast Node Manager (fnm) -> Latest Node.js and npm (clean, use npx)
 # ==============================================================================
 
 {
@@ -62,7 +62,7 @@ dnf install -y \
     "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm" \
     "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm" || { FAILURES=$((FAILURES+1)); echo "  !! RPM Fusion install failed"; }
 
-# Disable duplicate Workstation repos (Steam & NVIDIA are provided by full RPM Fusion)
+# Disable duplicate Workstation repos (Steam and NVIDIA are provided by full RPM Fusion)
 WORKSTATION_REPOS="/etc/yum.repos.d/fedora-workstation-repositories.repo"
 if [ -f "$WORKSTATION_REPOS" ]; then
     echo "--> Disabling duplicate Workstation repositories..."
@@ -105,7 +105,7 @@ enabled=1
 EOF
 
 # ==============================================================================
-# 4. MULTIMEDIA & HARDWARE ACCELERATION (AMD Picasso / Vega 8)
+# 4. MULTIMEDIA and HARDWARE ACCELERATION (AMD Picasso / Vega 8)
 # ==============================================================================
 echo "--> Swapping ffmpeg-free with full ffmpeg..."
 dnf install -y ffmpeg --allowerasing || { FAILURES=$((FAILURES+1)); echo "  !! ffmpeg swap failed"; }
@@ -124,7 +124,7 @@ else
 fi
 
 # ==============================================================================
-# 5. CORE PACKAGES & TOOLS
+# 5. CORE PACKAGES and TOOLS
 # ==============================================================================
 echo "--> Removing stock Firefox..."
 dnf remove -y firefox || true
@@ -133,11 +133,11 @@ echo "--> Installing Brave Origin, AMD hardware acceleration, and developer tool
 PKGS=(
     # Hardware acceleration for AMD VCN 1.0 / Vega 8
     mesa-dri-drivers mesa-va-drivers-freeworld libva libva-utils ffmpeg-libs
-    # Primary browser & desktop apps
+    # Primary browser and desktop apps
     brave-origin mpv gnome-boxes code google-cloud-cli libreoffice
-    # Build tools, AppImage runtime (fuse-libs) & shell utilities
+    # Build tools, AppImage runtime (fuse-libs) and shell utilities
     @development-tools python3 python3-pip distrobox git curl unzip fzf bash-completion fuse-libs
-    # Archives & fonts (cabextract required by Microsoft Core Fonts)
+    # Archives and fonts (cabextract required by Microsoft Core Fonts)
     flatpak cabextract mkfontscale fontconfig 7zip 7zip-standalone
     google-carlito-fonts google-crosextra-caladea-fonts
 )
@@ -194,7 +194,7 @@ fi
 flatpak update -y || true
 
 # ==============================================================================
-# 8. BASH ERGONOMICS, STARSHIP & READLINE (Zsh-like feel)
+# 8. BASH ERGONOMICS, STARSHIP and READLINE (Zsh-like feel)
 # ==============================================================================
 echo "--> Installing Starship prompt..."
 curl -sS https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin || { FAILURES=$((FAILURES+1)); echo "  !! Starship install failed"; }
@@ -213,7 +213,7 @@ set show-all-if-ambiguous on
 TAB: menu-complete
 "\e[Z": menu-complete-backward
 
-# Colored completion categories & highlighted prefixes
+# Colored completion categories and highlighted prefixes
 set colored-stats on
 set colored-completion-prefix on
 
@@ -230,7 +230,7 @@ EOF
         cat <<'BASHBLOCK' >> "$BASHRC_FILE"
 
 # BEGIN SETUP BLOCKS
-# 1. Ergonomics & Navigation
+# 1. Ergonomics and Navigation
 shopt -s autocd           # Jump into directory by typing its name
 shopt -s globstar         # Enable recursive ** globbing
 shopt -s cdspell dirspell # Auto-correct minor directory typos
@@ -283,7 +283,7 @@ if [ "$TARGET_USER" != "root" ]; then
 fi
 
 # ==============================================================================
-# 10. GNOME PREFERENCES & DESKTOP POLISH
+# 10. GNOME PREFERENCES and DESKTOP POLISH
 # ==============================================================================
 if [ "$TARGET_USER" != "root" ]; then
     echo "--> Setting GNOME interface to prefer dark theme..."
@@ -300,7 +300,7 @@ if [ "$TARGET_USER" != "root" ]; then
 fi
 
 # ==============================================================================
-# 11. FONTS (Fira Code Nerd Font & Microsoft Core Fonts)
+# 11. FONTS (Fira Code Nerd Font and Microsoft Core Fonts)
 # ==============================================================================
 if [ "$TARGET_USER" != "root" ]; then
     echo "--> Installing Fira Code Nerd Font..."
@@ -337,7 +337,7 @@ echo "Defaults pwfeedback" > /etc/sudoers.d/pwfeedback
 chmod 0440 /etc/sudoers.d/pwfeedback
 
 # ==============================================================================
-# 13. DNS RESOLVER (Strict DNS-over-TLS via Cloudflare & Google)
+# 13. DNS RESOLVER (Strict DNS-over-TLS via Cloudflare and Google)
 # ==============================================================================
 echo "--> Configuring systemd-resolved with strict DNS-over-TLS..."
 mkdir -p /etc/systemd/resolved.conf.d
