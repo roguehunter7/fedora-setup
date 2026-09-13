@@ -307,6 +307,33 @@ if [ "$TARGET_USER" != "root" ]; then
     sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" 2>/dev/null || true
 fi
 
+# LibreOffice: MS Office-like look (Colibre icons, tabbed ribbon UI, OOXML defaults)
+if [ "$TARGET_USER" != "root" ] && command -v libreoffice >/dev/null 2>&1; then
+    LO_XCU="$TARGET_HOME/.config/libreoffice/4/user/registrymodifications.xcu"
+    if [ ! -f "$LO_XCU" ]; then
+        echo "--> Configuring LibreOffice (Colibre icons, tabbed UI, OOXML defaults)..."
+        mkdir -p "$(dirname "$LO_XCU")"
+        cat <<'EOF' > "$LO_XCU"
+<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="FirstRun" oor:op="fuse"><value>false</value></prop></item>
+ <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="ShowTipOfTheDay" oor:op="fuse"><value>false</value></prop></item>
+ <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="SymbolStyle" oor:op="fuse"><value>colibre</value></prop></item>
+ <item oor:path="/org.openoffice.Office.UI.ToolbarMode"><prop oor:name="ActiveWriter" oor:op="fuse"><value>notebookbar.ui</value></prop></item>
+ <item oor:path="/org.openoffice.Office.UI.ToolbarMode"><prop oor:name="ActiveCalc" oor:op="fuse"><value>notebookbar.ui</value></prop></item>
+ <item oor:path="/org.openoffice.Office.UI.ToolbarMode"><prop oor:name="ActiveImpress" oor:op="fuse"><value>notebookbar.ui</value></prop></item>
+ <item oor:path="/org.openoffice.Office.UI.ToolbarMode/Applications/org.openoffice.Office.UI.ToolbarMode:Application['Writer']"><prop oor:name="Active" oor:op="fuse"><value>notebookbar.ui</value></prop></item>
+ <item oor:path="/org.openoffice.Office.UI.ToolbarMode/Applications/org.openoffice.Office.UI.ToolbarMode:Application['Calc']"><prop oor:name="Active" oor:op="fuse"><value>notebookbar.ui</value></prop></item>
+ <item oor:path="/org.openoffice.Office.UI.ToolbarMode/Applications/org.openoffice.Office.UI.ToolbarMode:Application['Impress']"><prop oor:name="Active" oor:op="fuse"><value>notebookbar.ui</value></prop></item>
+ <item oor:path="/org.openoffice.Setup/Office/Factories/org.openoffice.Setup:Factory[com.sun.star.text.TextDocument]"><prop oor:name="ooSetupFactoryDefaultFilter" oor:op="fuse"><value>MS Word 2007 XML</value></prop></item>
+ <item oor:path="/org.openoffice.Setup/Office/Factories/org.openoffice.Setup:Factory[com.sun.star.sheet.SpreadSheetDocument]"><prop oor:name="ooSetupFactoryDefaultFilter" oor:op="fuse"><value>Calc MS Excel 2007 XML</value></prop></item>
+ <item oor:path="/org.openoffice.Setup/Office/Factories/org.openoffice.Setup:Factory[com.sun.star.presentation.PresentationDocument]"><prop oor:name="ooSetupFactoryDefaultFilter" oor:op="fuse"><value>Impress MS PowerPoint 2007 XML</value></prop></item>
+</oor:items>
+EOF
+        chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config/libreoffice"
+    fi
+fi
+
 # ==============================================================================
 # 11. FONTS (Fira Code Nerd Font and Microsoft Core Fonts)
 # ==============================================================================
