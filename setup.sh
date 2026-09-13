@@ -113,6 +113,16 @@ dnf install -y ffmpeg --allowerasing || { FAILURES=$((FAILURES+1)); echo "  !! f
 echo "--> Installing RPM Fusion multimedia group..."
 dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin || { FAILURES=$((FAILURES+1)); echo "  !! multimedia group install failed"; }
 
+echo "--> Installing sound-and-video group..."
+dnf group install -y "sound-and-video" || { FAILURES=$((FAILURES+1)); echo "  !! sound-and-video group install failed"; }
+
+echo "--> Swapping in freeworld Mesa Vulkan drivers (Vulkan Video H.264/H.265)..."
+if rpm -q mesa-vulkan-drivers >/dev/null 2>&1 && ! rpm -q mesa-vulkan-drivers-freeworld >/dev/null 2>&1; then
+    dnf swap -y mesa-vulkan-drivers mesa-vulkan-drivers-freeworld || { FAILURES=$((FAILURES+1)); echo "  !! mesa-vulkan-drivers freeworld swap failed"; }
+else
+    echo "    (already on mesa-vulkan-drivers-freeworld, or stock driver not present)"
+fi
+
 # ==============================================================================
 # 5. CORE PACKAGES & TOOLS
 # ==============================================================================
@@ -122,7 +132,7 @@ dnf remove -y firefox || true
 echo "--> Installing Brave Origin, AMD hardware acceleration, and developer tools..."
 PKGS=(
     # Hardware acceleration for AMD VCN 1.0 / Vega 8
-    mesa-dri-drivers mesa-va-drivers-freeworld libva-utils
+    mesa-dri-drivers mesa-va-drivers-freeworld libva libva-utils ffmpeg-libs
     # Primary browser & desktop apps
     brave-origin mpv gnome-boxes code google-cloud-cli libreoffice
     # Build tools, AppImage runtime (fuse-libs) & shell utilities
