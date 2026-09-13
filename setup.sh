@@ -462,6 +462,7 @@ echo "  vainfo                        # Verify AMD VCN video hardware accelerati
 echo "  powerprofilesctl              # Verify GNOME power profiles daemon"
 echo "  echo \$SHELL                  # Should print /usr/bin/zsh after re-login"
 echo ""
-echo "Please reboot to ensure all graphics, power, and session changes are cleanly loaded."
-echo "=============================================================================="
+echo "Rebooting to apply all graphics, power, and session changes..."
+sync
+sudo reboot
 }

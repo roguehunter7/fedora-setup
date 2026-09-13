@@ -28,3 +28,5 @@ Or from a clone:
 git clone https://github.com/roguehunter7/fedora-setup && cd fedora-setup
 sudo ./setup.sh
 ```
+
+The script reboots the machine at the end so all graphics, power and session changes take effect.
