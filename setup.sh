@@ -136,7 +136,7 @@ PKGS=(
     # Primary browser and desktop apps
     brave-origin mpv gnome-boxes code google-cloud-cli libreoffice
     # Build tools, AppImage runtime (fuse-libs) and shell utilities
-    @development-tools python3 python3-pip distrobox git curl unzip zsh fzf fuse-libs
+    @development-tools python3 python3-pip distrobox git curl unzip zsh zsh-autosuggestions zsh-syntax-highlighting fzf fuse-libs
     # Archives and fonts (cabextract required by Microsoft Core Fonts)
     flatpak cabextract mkfontscale fontconfig 7zip 7zip-standalone
     google-carlito-fonts google-crosextra-caladea-fonts
@@ -217,50 +217,49 @@ if [ "$TARGET_USER" != "root" ]; then
         cat <<'ZSHBLOCK' >> "$ZSHRC_FILE"
 
 # BEGIN SETUP BLOCKS
-# 1. History
-HISTFILE="$HOME/.zsh_history"
-HISTSIZE=10000
-SAVEHIST=20000
-setopt hist_ignore_all_dups hist_ignore_space share_history extended_history inc_append_history
-
-# 2. Navigation and globbing
-setopt autocd correct extendedglob
-
-# 3. Completion (case-insensitive, menu select)
-autoload -Uz compinit && compinit
-zstyle ':completion:*' menu select
-zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
-setopt always_to_end complete_in_word
-
-# 4. Prefix-matching history search (type "git " then Up to filter history)
-autoload -Uz up-line-or-beginning-search down-line-or-beginning-search
-zle -N up-line-or-beginning-search
-zle -N down-line-or-beginning-search
-bindkey '^[[A' up-line-or-beginning-search
-bindkey '^[[B' down-line-or-beginning-search
-
-# 5. PATH
-export PATH="$HOME/.local/bin:$PATH"
-
-# 6. Fast Node Manager (fnm)
-export PATH="$HOME/.local/share/fnm:$PATH"
+# Node.js (fnm) and local binaries
+export PATH="$HOME/.local/bin:$HOME/.local/share/fnm:$PATH"
 if command -v fnm >/dev/null 2>&1; then
     eval "$(fnm env --use-on-cd --resolve-engines --shell zsh)"
 fi
 
-# 7. FZF Integration (Ctrl+R history search, Ctrl+T file finding)
-if command -v fzf >/dev/null 2>&1; then
-    if fzf --zsh >/dev/null 2>&1; then
-        source <(fzf --zsh)
-    elif [ -f /usr/share/fzf/shell/key-bindings.zsh ]; then
-        source /usr/share/fzf/shell/key-bindings.zsh
-    fi
-fi
+# Completion
+autoload -U compinit
+compinit
+setopt COMPLETE_IN_WORD
 
-# 8. Starship Prompt
-if command -v starship >/dev/null 2>&1; then
-    eval "$(starship init zsh)"
-fi
+# History
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt appendhistory
+setopt SHARE_HISTORY
+
+# Navigation
+setopt autocd
+unsetopt nomatch
+
+# Prompt and plugins
+eval "$(starship init zsh)"
+source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+source /usr/share/fzf/shell/key-bindings.zsh
+
+# Ctrl + Arrow keybindings
+bindkey "^[[1;5D" backward-word
+bindkey "^[[1;5C" forward-word
+
+# Ctrl + Backspace/Delete keybindings
+bindkey '^H' backward-kill-word
+bindkey '^[[3;5~' kill-word
+
+# Alt + Backspace/Delete keybindings
+bindkey "^[[3~" delete-char
+bindkey -M emacs '^[[3;3~' kill-word
+
+# Home/End keybindings
+bindkey '^[[H' beginning-of-line
+bindkey '^[[F' end-of-line
 # END SETUP BLOCKS
 ZSHBLOCK
     fi
