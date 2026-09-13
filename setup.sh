@@ -4,7 +4,7 @@
 # ==============================================================================
 # Target   : Fresh Fedora Workstation install (GNOME Wayland)
 # Hardware : AMD Ryzen/Picasso laptop (amdgpu, Vega 8, VCN)
-# Shell    : Bash + Readline completion polish + Starship + FZF
+# Shell    : Zsh + Starship + FZF
 # Browser  : Brave Origin (native RPM with PWAs + Widevine DRM, no AI/Crypto)
 # Node     : Fast Node Manager (fnm) -> Latest Node.js and npm (clean, use npx)
 # ==============================================================================
@@ -136,7 +136,7 @@ PKGS=(
     # Primary browser and desktop apps
     brave-origin mpv gnome-boxes code google-cloud-cli libreoffice
     # Build tools, AppImage runtime (fuse-libs) and shell utilities
-    @development-tools python3 python3-pip distrobox git curl unzip fzf bash-completion fuse-libs
+    @development-tools python3 python3-pip distrobox git curl unzip zsh fzf fuse-libs
     # Archives and fonts (cabextract required by Microsoft Core Fonts)
     flatpak cabextract mkfontscale fontconfig 7zip 7zip-standalone
     google-carlito-fonts google-crosextra-caladea-fonts
@@ -194,76 +194,77 @@ fi
 flatpak update -y || true
 
 # ==============================================================================
-# 8. BASH ERGONOMICS, STARSHIP and READLINE (Zsh-like feel)
+# 8. ZSH SHELL, STARSHIP and FZF
 # ==============================================================================
 echo "--> Installing Starship prompt..."
 curl -sS https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin || { FAILURES=$((FAILURES+1)); echo "  !! Starship install failed"; }
 
 if [ "$TARGET_USER" != "root" ]; then
-    echo "--> Configuring Readline (~/.inputrc) for Zsh-like tab cycling & prefix search..."
-    INPUTRC_FILE="$TARGET_HOME/.inputrc"
-    cat <<'EOF' > "$INPUTRC_FILE"
-# Case-insensitive tab completion
-set completion-ignore-case on
+    ZSH_BIN="$(command -v zsh || true)"
+    if [ -n "$ZSH_BIN" ]; then
+        echo "--> Setting zsh as the default shell for $TARGET_USER..."
+        grep -qx "$ZSH_BIN" /etc/shells || echo "$ZSH_BIN" >> /etc/shells
+        if [ "$(getent passwd "$TARGET_USER" | cut -d: -f7)" != "$ZSH_BIN" ]; then
+            chsh -s "$ZSH_BIN" "$TARGET_USER" || { FAILURES=$((FAILURES+1)); echo "  !! chsh to zsh failed"; }
+        fi
+    else
+        FAILURES=$((FAILURES+1)); echo "  !! zsh not found; skipping shell switch"
+    fi
 
-# Show all completions immediately on single Tab
-set show-all-if-ambiguous on
-
-# Cycle completions using Tab and Shift-Tab
-TAB: menu-complete
-"\e[Z": menu-complete-backward
-
-# Colored completion categories and highlighted prefixes
-set colored-stats on
-set colored-completion-prefix on
-
-# Prefix-matching history search (type "git " and press Up to filter history)
-"\e[A": history-search-backward
-"\e[B": history-search-forward
-EOF
-    chown "$TARGET_USER":"$TARGET_GROUP" "$INPUTRC_FILE"
-    chmod 0644 "$INPUTRC_FILE"
-
-    echo "--> Adding shell enhancements and tool hooks to ~/.bashrc..."
-    BASHRC_FILE="$TARGET_HOME/.bashrc"
-    if ! grep -q 'BEGIN SETUP BLOCKS' "$BASHRC_FILE" 2>/dev/null; then
-        cat <<'BASHBLOCK' >> "$BASHRC_FILE"
+    echo "--> Writing ~/.zshrc..."
+    ZSHRC_FILE="$TARGET_HOME/.zshrc"
+    if ! grep -q 'BEGIN SETUP BLOCKS' "$ZSHRC_FILE" 2>/dev/null; then
+        cat <<'ZSHBLOCK' >> "$ZSHRC_FILE"
 
 # BEGIN SETUP BLOCKS
-# 1. Ergonomics and Navigation
-shopt -s autocd           # Jump into directory by typing its name
-shopt -s globstar         # Enable recursive ** globbing
-shopt -s cdspell dirspell # Auto-correct minor directory typos
-shopt -s checkwinsize     # Update window dimensions dynamically
-shopt -s histappend       # Append rather than overwrite history
-
-# 2. History Settings
-HISTCONTROL=ignoreboth:erasedups
+# 1. History
+HISTFILE="$HOME/.zsh_history"
 HISTSIZE=10000
-HISTFILESIZE=20000
+SAVEHIST=20000
+setopt hist_ignore_all_dups hist_ignore_space share_history extended_history inc_append_history
 
-# 3. PATH
+# 2. Navigation and globbing
+setopt autocd correct extendedglob
+
+# 3. Completion (case-insensitive, menu select)
+autoload -Uz compinit && compinit
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+setopt always_to_end complete_in_word
+
+# 4. Prefix-matching history search (type "git " then Up to filter history)
+autoload -Uz up-line-or-beginning-search down-line-or-beginning-search
+zle -N up-line-or-beginning-search
+zle -N down-line-or-beginning-search
+bindkey '^[[A' up-line-or-beginning-search
+bindkey '^[[B' down-line-or-beginning-search
+
+# 5. PATH
 export PATH="$HOME/.local/bin:$PATH"
 
-# 4. Fast Node Manager (fnm)
+# 6. Fast Node Manager (fnm)
 export PATH="$HOME/.local/share/fnm:$PATH"
 if command -v fnm >/dev/null 2>&1; then
-    eval "$(fnm env --use-on-cd --resolve-engines --shell bash)"
+    eval "$(fnm env --use-on-cd --resolve-engines --shell zsh)"
 fi
 
-# 5. FZF Integration (Ctrl+R history search, Ctrl+T file finding)
+# 7. FZF Integration (Ctrl+R history search, Ctrl+T file finding)
 if command -v fzf >/dev/null 2>&1; then
-    eval "$(fzf --bash 2>/dev/null)" || [ -f /usr/share/fzf/shell/key-bindings.bash ] && source /usr/share/fzf/shell/key-bindings.bash
+    if fzf --zsh >/dev/null 2>&1; then
+        source <(fzf --zsh)
+    elif [ -f /usr/share/fzf/shell/key-bindings.zsh ]; then
+        source /usr/share/fzf/shell/key-bindings.zsh
+    fi
 fi
 
-# 6. Starship Prompt
+# 8. Starship Prompt
 if command -v starship >/dev/null 2>&1; then
-    eval "$(starship init bash)"
+    eval "$(starship init zsh)"
 fi
 # END SETUP BLOCKS
-BASHBLOCK
+ZSHBLOCK
     fi
-    chown "$TARGET_USER":"$TARGET_GROUP" "$BASHRC_FILE"
+    chown "$TARGET_USER":"$TARGET_GROUP" "$ZSHRC_FILE"
 fi
 
 # ==============================================================================
@@ -276,7 +277,7 @@ if [ "$TARGET_USER" != "root" ]; then
     echo "--> Installing latest Node.js release and setting as default..."
     sudo -u "$TARGET_USER" bash -c '
         export PATH="$HOME/.local/share/fnm:$PATH"
-        eval "$("$HOME/.local/share/fnm/fnm" env --shell bash)"
+        eval "$("$HOME/.local/share/fnm/fnm" env --shell zsh)"
         fnm install --latest
         fnm default latest
     ' || { FAILURES=$((FAILURES+1)); echo "  !! Node.js installation via fnm failed"; }
@@ -373,6 +374,7 @@ echo "  npm -v                        # Verify npm"
 echo "  brave-origin                  # Launch Brave Origin"
 echo "  vainfo                        # Verify AMD VCN video hardware acceleration"
 echo "  powerprofilesctl              # Verify GNOME power profiles daemon"
+echo "  echo \$SHELL                  # Should print /usr/bin/zsh after re-login"
 echo ""
 echo "Please reboot to ensure all graphics, power, and session changes are cleanly loaded."
 echo "=============================================================================="
