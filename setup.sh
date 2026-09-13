@@ -38,11 +38,13 @@ echo "--> Target User: $TARGET_USER  |  Home: $TARGET_HOME"
 # ==============================================================================
 # 1. DNF 5 SPEEDUPS (KISS Drop-in)
 # ==============================================================================
-echo "--> Configuring DNF parallel downloads via clean drop-in..."
+echo "--> Configuring DNF (parallel downloads, fastest mirror, assume yes)..."
 mkdir -p /etc/dnf/libdnf5.conf.d
 cat <<EOF > /etc/dnf/libdnf5.conf.d/80-parallel-downloads.conf
 [main]
 max_parallel_downloads = 10
+fastestmirror = True
+assumeyes = True
 EOF
 chmod 0644 /etc/dnf/libdnf5.conf.d/80-parallel-downloads.conf
 
@@ -126,9 +128,6 @@ fi
 # ==============================================================================
 # 5. CORE PACKAGES and TOOLS
 # ==============================================================================
-echo "--> Removing stock Firefox..."
-dnf remove -y firefox || true
-
 echo "--> Installing Brave Origin, AMD hardware acceleration, and developer tools..."
 PKGS=(
     # Hardware acceleration for AMD VCN 1.0 / Vega 8
@@ -291,6 +290,12 @@ if [ "$TARGET_USER" != "root" ]; then
 
     echo "--> Enabling volume overamplification (allows up to 150%)..."
     sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.sound allow-volume-above-100-percent true || true
+
+    echo "--> Enabling three window buttons (minimize, maximize, close)..."
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close' || true
+
+    echo "--> Enabling two-finger touchpad scrolling..."
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad two-finger-scrolling-enabled true || true
 
     echo "--> Disabling GNOME Software background autostart & search provider (saving ~500MB RAM)..."
     mkdir -p "$TARGET_HOME/.config/autostart"
