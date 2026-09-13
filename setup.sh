@@ -289,6 +289,9 @@ if [ "$TARGET_USER" != "root" ]; then
     echo "--> Setting GNOME interface to prefer dark theme..."
     sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' || true
 
+    echo "--> Enabling volume overamplification (allows up to 150%)..."
+    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.sound allow-volume-above-100-percent true || true
+
     echo "--> Disabling GNOME Software background autostart & search provider (saving ~500MB RAM)..."
     mkdir -p "$TARGET_HOME/.config/autostart"
     if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
