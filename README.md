@@ -10,6 +10,7 @@ install, aimed at an AMD Ryzen/Picasso laptop (amdgpu, Vega 8, VCN).
 - **System** — DNF tuned (parallel downloads, fastest mirror, assume-yes); fstrim timer, 500M journal cap, 2s GRUB timeout, firmware updates; disables `NetworkManager-wait-online`, ModemManager, cups and abrtd.
 - **Shell** — Zsh set as the login shell, with a `.zshrc` matching Ultramarine's defaults (Starship, zsh-autosuggestions, zsh-syntax-highlighting, fzf, history and keybindings), plus fnm with the latest Node.js.
 - **Desktop & fonts** — GNOME dark theme, volume overamplification enabled (up to 150%), three window buttons, two-finger touchpad scrolling, GNOME Software autostart/search disabled, LibreOffice set to a MS Office-like look (Colibre icons, tabbed UI, OOXML save defaults), Fira Code Nerd Font and MS core fonts.
+- **GNOME extensions** — AppIndicator (tray icons), Blur My Shell, Dash to Dock, Status Icons, Copyous, and Bluetooth Quick Connect.
 - **Network** — systemd-resolved with Cloudflare/Google DNS-over-TLS, NetworkManager pointed at resolved.
 - **Other** — Flatpak/Flathub with the Fedora remote removed, sudo password feedback.
 

@@ -134,8 +134,11 @@ PKGS=(
     mesa-dri-drivers mesa-va-drivers-freeworld libva libva-utils ffmpeg-libs
     # Primary browser and desktop apps
     brave-origin mpv gnome-boxes code google-cloud-cli libreoffice
+    # GNOME Shell extensions available as Fedora packages
+    gnome-shell-extension-appindicator gnome-shell-extension-blur-my-shell
+    gnome-shell-extension-dash-to-dock gnome-shell-extension-status-icons
     # Build tools, AppImage runtime (fuse-libs) and shell utilities
-    @development-tools python3 python3-pip distrobox git curl unzip zsh zsh-autosuggestions zsh-syntax-highlighting fzf fuse-libs
+    @development-tools python3 python3-pip python3-gobject distrobox git curl unzip zsh zsh-autosuggestions zsh-syntax-highlighting fzf fuse-libs
     # Archives and fonts (cabextract required by Microsoft Core Fonts)
     flatpak cabextract mkfontscale fontconfig 7zip 7zip-standalone
     google-carlito-fonts google-crosextra-caladea-fonts
@@ -332,6 +335,55 @@ if [ "$TARGET_USER" != "root" ] && command -v libreoffice >/dev/null 2>&1; then
 EOF
         chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config/libreoffice"
     fi
+fi
+
+# GNOME Shell extensions (RPM ones installed above; these two are catalog-only)
+if [ "$TARGET_USER" != "root" ] && command -v gnome-shell >/dev/null 2>&1; then
+    GNOME_MAJOR="$(gnome-shell --version | awk '{print $3}' | cut -d. -f1)"
+    EXT_DIR="$TARGET_HOME/.local/share/gnome-shell/extensions"
+    mkdir -p "$EXT_DIR"
+
+    for uuid in copyous@boerdereinar.dev bluetooth-quick-connect@bjarosze.gmail.com; do
+        if [ -d "$EXT_DIR/$uuid" ]; then
+            echo "    (GNOME extension already present: $uuid)"
+            continue
+        fi
+        echo "--> Installing GNOME extension $uuid..."
+        EXT_URL="$(curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$uuid&shell_version=$GNOME_MAJOR" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("download_url",""))' 2>/dev/null || true)"
+        if [ -n "$EXT_URL" ]; then
+            EXT_ZIP="$(mktemp)"
+            if curl -fsSL "https://extensions.gnome.org$EXT_URL" -o "$EXT_ZIP"; then
+                mkdir -p "$EXT_DIR/$uuid"
+                unzip -oq "$EXT_ZIP" -d "$EXT_DIR/$uuid"
+                [ -d "$EXT_DIR/$uuid/schemas" ] && glib-compile-schemas "$EXT_DIR/$uuid/schemas" || true
+            else
+                FAILURES=$((FAILURES+1)); echo "  !! download failed: $uuid"
+            fi
+            rm -f "$EXT_ZIP"
+        else
+            FAILURES=$((FAILURES+1)); echo "  !! no build for GNOME $GNOME_MAJOR: $uuid"
+        fi
+    done
+    chown -R "$TARGET_USER":"$TARGET_GROUP" "$EXT_DIR"
+
+    echo "--> Enabling GNOME extensions..."
+    sudo -u "$TARGET_USER" dbus-run-session python3 - <<'PY' || true
+from gi.repository import Gio
+
+wanted = [
+    "appindicatorsupport@rgcjonas.gmail.com",
+    "blur-my-shell@aunetx",
+    "dash-to-dock@micxgx.gmail.com",
+    "status-icons@gnome-shell-extensions.gcampax.github.com",
+    "copyous@boerdereinar.dev",
+    "bluetooth-quick-connect@bjarosze.gmail.com",
+]
+settings = Gio.Settings.new("org.gnome.shell")
+current = list(settings.get_strv("enabled-extensions"))
+missing = [uuid for uuid in wanted if uuid not in current]
+if missing:
+    settings.set_strv("enabled-extensions", current + missing)
+PY
 fi
 
 # ==============================================================================
