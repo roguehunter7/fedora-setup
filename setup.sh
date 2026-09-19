@@ -64,13 +64,19 @@ dnf install -y \
     "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm" \
     "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm" || { FAILURES=$((FAILURES+1)); echo "  !! RPM Fusion install failed"; }
 
-# Disable duplicate Workstation repos (Steam and NVIDIA are provided by full RPM Fusion)
-WORKSTATION_REPOS="/etc/yum.repos.d/fedora-workstation-repositories.repo"
-if [ -f "$WORKSTATION_REPOS" ]; then
+# Disable duplicate Workstation repos (Steam and NVIDIA are provided by full RPM Fusion).
+# Fedora 45 relocates packaged repos to /usr/share/dnf5/repos.d, so use a DNF5 override drop-in.
+if [ -f /etc/yum.repos.d/fedora-workstation-repositories.repo ] || \
+   [ -f /usr/share/dnf5/repos.d/fedora-workstation-repositories.repo ]; then
     echo "--> Disabling duplicate Workstation repositories..."
-    for section in rpmfusion-nonfree-nvidia-driver rpmfusion-steam; do
-        sed -i "/^\[$section\]/,/^\[/{s/^enabled=.*/enabled=0/}" "$WORKSTATION_REPOS"
-    done
+    mkdir -p /etc/dnf/repos.override.d
+    cat <<EOF > /etc/dnf/repos.override.d/99-disable-duplicates.repo
+[rpmfusion-nonfree-nvidia-driver]
+enabled=0
+[rpmfusion-steam]
+enabled=0
+EOF
+    chmod 0644 /etc/dnf/repos.override.d/99-disable-duplicates.repo
 fi
 
 mkdir -p /etc/yum.repos.d
@@ -110,7 +116,7 @@ EOF
 # 4. MULTIMEDIA and HARDWARE ACCELERATION (AMD Picasso / Vega 8)
 # ==============================================================================
 echo "--> Swapping ffmpeg-free with full ffmpeg..."
-dnf install -y ffmpeg --allowerasing || { FAILURES=$((FAILURES+1)); echo "  !! ffmpeg swap failed"; }
+dnf install -y ffmpeg --allowerasing --allow-vendor-change || { FAILURES=$((FAILURES+1)); echo "  !! ffmpeg swap failed"; }
 
 echo "--> Installing RPM Fusion multimedia group..."
 dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin || { FAILURES=$((FAILURES+1)); echo "  !! multimedia group install failed"; }
@@ -120,7 +126,7 @@ dnf group install -y "sound-and-video" || { FAILURES=$((FAILURES+1)); echo "  !!
 
 echo "--> Swapping in freeworld Mesa Vulkan drivers (Vulkan Video H.264/H.265)..."
 if rpm -q mesa-vulkan-drivers >/dev/null 2>&1 && ! rpm -q mesa-vulkan-drivers-freeworld >/dev/null 2>&1; then
-    dnf swap -y mesa-vulkan-drivers mesa-vulkan-drivers-freeworld || { FAILURES=$((FAILURES+1)); echo "  !! mesa-vulkan-drivers freeworld swap failed"; }
+    dnf swap -y --allow-vendor-change mesa-vulkan-drivers mesa-vulkan-drivers-freeworld || { FAILURES=$((FAILURES+1)); echo "  !! mesa-vulkan-drivers freeworld swap failed"; }
 else
     echo "    (already on mesa-vulkan-drivers-freeworld, or stock driver not present)"
 fi
@@ -156,9 +162,6 @@ fi
 # ==============================================================================
 # 6. SYSTEM TUNING (KISS)
 # ==============================================================================
-echo "--> Enabling weekly SSD TRIM timer..."
-systemctl enable fstrim.timer || true
-
 echo "--> Disabling NetworkManager-wait-online.service..."
 systemctl disable NetworkManager-wait-online.service || true
 
@@ -184,6 +187,25 @@ for svc in ModemManager cups abrtd; do
         systemctl disable --now "$svc.service" >/dev/null 2>&1 || true
     fi
 done
+
+echo "--> Configuring zram (zstd, balanced size) via drop-in..."
+mkdir -p /etc/systemd/zram-generator.conf.d
+cat <<EOF > /etc/systemd/zram-generator.conf.d/99-zram.conf
+[zram0]
+zram-size = min(ram, 8192)
+compression-algorithm = zstd
+EOF
+chmod 0644 /etc/systemd/zram-generator.conf.d/99-zram.conf
+
+echo "--> Applying compressed-RAM kernel parameters..."
+cat <<EOF > /etc/sysctl.d/99-zram.conf
+vm.swappiness = 100
+vm.watermark_boost_factor = 0
+vm.watermark_scale_factor = 125
+vm.page-cluster = 0
+EOF
+chmod 0644 /etc/sysctl.d/99-zram.conf
+sysctl --system >/dev/null 2>&1 || true
 
 # ==============================================================================
 # 7. FLATPAK (Flathub Only)
@@ -409,7 +431,7 @@ echo "--> Installing Microsoft Core Fonts..."
 MSRPM="/tmp/msttcore-fonts-installer-2.6-1.noarch.rpm"
 curl -fsSL -o "$MSRPM" https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm || true
 if [ -f "$MSRPM" ]; then
-    rpm -i "$MSRPM" 2>/dev/null || true
+    rpm -i --nosignature "$MSRPM" 2>/dev/null || true
     rm -f "$MSRPM"
 fi
 
