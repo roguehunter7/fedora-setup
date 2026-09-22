@@ -4,11 +4,13 @@
 # ==============================================================================
 # Target   : Fresh Arch Linux install (KDE Plasma 6, Wayland, GRUB)
 # Hardware : AMD Ryzen 5 3500U / 8GB RAM / NVMe SSD / Btrfs
+# Power    : TLP and a 60% battery charge limit
 # Shell    : Zsh + Starship + FZF
 # Browser  : Firefox
 # Node     : Fast Node Manager (fnm) -> latest Node.js (clean, use npx)
 # Java     : latest OpenJDK SDK (jdk-openjdk)
 # Boot     : GRUB or systemd-boot (auto-detected); AMD microcode via mkinitcpio
+# Safety   : snapper + snap-pac + grub-btrfs snapshots, AppArmor
 # ==============================================================================
 # Lean philosophy: a curated package set instead of plasma-meta / gnome-meta.
 # Mirrors the Fedora setup's tuning, shell, fonts, DNS and SSD work.
@@ -155,7 +157,10 @@ for f in \
     /etc/systemd/zram-generator.conf /etc/sysctl.d/99-performance.conf \
     /etc/default/earlyoom /etc/xdg/baloofilerc \
     /etc/systemd/journald.conf.d /etc/systemd/resolved.conf.d \
-    /etc/NetworkManager/conf.d /etc/sddm.conf.d /etc/firefox/policies; do
+    /etc/NetworkManager/conf.d /etc/sddm.conf.d /etc/firefox/policies \
+    /etc/tlp.d /etc/conf.d/snapper /etc/snapper/configs \
+    /etc/default/btrfsmaintenance /etc/smartd.conf /etc/nsswitch.conf \
+    /etc/xdg/reflector; do
     backup_file "$f"
 done
 [ "$DRY_RUN" = 1 ] || ok "Backups stored in $BACKUP_DIR"
@@ -220,6 +225,15 @@ if command -v reflector >/dev/null 2>&1 && [ "$DRY_RUN" = 0 ]; then
         || warn "reflector failed; keeping the existing mirrorlist"
 fi
 
+info "Writing the reflector timer configuration..."
+cat <<'EOF' | apply /etc/xdg/reflector/reflector.conf
+--save /etc/pacman.d/mirrorlist
+--protocol https
+--latest 20
+--sort rate
+#--country India
+EOF
+
 info "Synchronizing repositories and upgrading the system..."
 run pacman -Syu --noconfirm || fail "System upgrade failed"
 
@@ -244,13 +258,14 @@ info "Installing the curated package set (this is the long step)..."
 PACKAGES=(
     # --- Minimal Plasma 6: plasma-desktop, not plasma-meta ---
     plasma-desktop plasma-workspace plasma-nm plasma-pa
-    power-profiles-daemon kscreen kwin bluedevil
+    kscreen kwin bluedevil
     sddm sddm-kcm breeze breeze-gtk kde-gtk-config
-    xdg-desktop-portal-kde qt6-wayland kwallet kwallet-pam
-    kwalletmanager plasma-browser-integration
+    xdg-desktop-portal-kde xdg-desktop-portal-gtk qt6-wayland
+    kwallet kwallet-pam kwalletmanager plasma-browser-integration
     dolphin konsole kate gwenview spectacle ark
     kdegraphics-thumbnailers ffmpegthumbs kimageformats
-    print-manager kdeconnect
+    kio-extras kio-admin dolphin-plugins plasma-systemmonitor
+    print-manager
 
     # --- Build toolchain & languages ---
     cmake ninja clang gdb cpupower
@@ -285,24 +300,48 @@ PACKAGES=(
     # --- Printing (socket-activated) ---
     cups
 
-    # --- Lean system services ---
-    ufw earlyoom networkmanager systemd-resolvconf
-    zram-generator pacman-contrib flatpak fwupd powertop
+    # --- Power management (TLP replaces power-profiles-daemon) ---
+    tlp tlp-pd lm_sensors
+
+    # --- Snapshots, rollback and Btrfs maintenance ---
+    snapper snap-pac grub-btrfs inotify-tools btrfs-assistant btrfsmaintenance
+
+    # --- Audio effects for the laptop speakers ---
+    easyeffects lsp-plugins-lv2 calf
+
+    # --- Security and storage diagnostics ---
+    apparmor arch-audit smartmontools nvme-cli informant
+
+    # --- Network discovery and lean system services ---
+    ufw earlyoom networkmanager
+    zram-generator pacman-contrib flatpak fwupd
+    avahi nss-mdns irqbalance
+
+    # --- Small utilities ---
+    openssh rsync dosfstools mtools usbutils unrar
+
+    # --- Optional media helpers ---
+    yt-dlp pipewire-jack
 
     # --- Shell & documentation ---
-    zsh zsh-autosuggestions zsh-syntax-highlighting fzf starship
+    zsh zsh-autosuggestions zsh-syntax-highlighting zsh-completions
+    zsh-history-substring-search fzf starship
     bash-completion man-db man-pages fastfetch
 
     # --- Fonts ---
-    noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-dejavu
-    ttf-carlito ttf-caladea ttf-croscore
+    noto-fonts noto-fonts-cjk noto-fonts-emoji noto-fonts-extra ttf-dejavu
+    ttf-carlito ttf-caladea ttf-croscore ttf-firacode-nerd
 )
 
-run pacman -S --needed --noconfirm "${PACKAGES[@]}" || fail "Package installation failed"
+# TLP conflicts with power-profiles-daemon and tuned.
+for p in power-profiles-daemon tuned-ppd tuned; do
+    if pacman -Q "$p" >/dev/null 2>&1; then
+        info "Removing $p (conflicts with TLP)..."
+        run pacman -Rns --noconfirm "$p" || warn "Could not remove $p"
+    fi
+done
 
-if pacman -Q tlp >/dev/null 2>&1; then
-    warn "TLP is installed and conflicts with power-profiles-daemon. Remove one of them."
-fi
+run pacman -S --needed --noconfirm "${PACKAGES[@]}" || fail "Package installation failed"
 
 # ==============================================================================
 # 4. AUR: MICROSOFT CORE FONTS
@@ -311,6 +350,9 @@ if [ "$TARGET_USER" != "root" ]; then
     info "Installing Microsoft core fonts from the AUR..."
     aur_install ttf-ms-fonts
     run fc-cache -f || true
+
+    info "Installing downgrade from the AUR..."
+    aur_install downgrade
 fi
 
 # ==============================================================================
@@ -369,11 +411,20 @@ setopt SHARE_HISTORY
 setopt autocd
 unsetopt nomatch
 
-# Prompt and plugins
+# Prompt and plugins (Arch paths)
 eval "$(starship init zsh)"
-[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-[ -f /usr/share/fzf/shell/key-bindings.zsh ] && source /usr/share/fzf/shell/key-bindings.zsh
+
+[ -f /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/fzf/key-bindings.zsh ] && source /usr/share/fzf/key-bindings.zsh
+
+if [ -f /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh ]; then
+    source /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh
+    bindkey '^[[A' history-substring-search-up
+    bindkey '^[[B' history-substring-search-down
+fi
+
+# zsh-syntax-highlighting goes last: it wraps the widgets sourced above.
+[ -f /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # Ctrl + Arrow keybindings
 bindkey "^[[1;5D" backward-word
@@ -467,25 +518,12 @@ EOF
 fi
 
 # ==============================================================================
-# 9. FONTS (Fira Code Nerd Font; MS fonts installed above)
+# 9. FONTS (Fira Code Nerd Font from the repos, MS fonts above, rendering)
 # ==============================================================================
-if [ "$TARGET_USER" != "root" ]; then
-    FONT_DIR="$TARGET_HOME/.local/share/fonts"
-    run mkdir -p "$FONT_DIR"
-    run chown "$TARGET_USER":"$TARGET_GROUP" "$FONT_DIR"
-    run chmod 0755 "$FONT_DIR"
+info "Enabling sub-pixel RGB rendering and the LCD filter..."
+run ln -sf /usr/share/fontconfig/conf.avail/10-sub-pixel-rgb.conf /etc/fonts/conf.d/10-sub-pixel-rgb.conf
+run ln -sf /usr/share/fontconfig/conf.avail/11-lcdfilter-default.conf /etc/fonts/conf.d/11-lcdfilter-default.conf
 
-    if ! compgen -G "$FONT_DIR/FiraCode*.ttf" >/dev/null 2>&1; then
-        info "Installing Fira Code Nerd Font..."
-        run as_user curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" \
-            https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz \
-            || warn "Fira Code download failed"
-        if [ -f "$TARGET_HOME/FiraCode.tar.xz" ]; then
-            run as_user tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR" || warn "Fira Code extraction failed"
-            run rm -f "$TARGET_HOME/FiraCode.tar.xz"
-        fi
-    fi
-fi
 run fc-cache -f || true
 
 # ==============================================================================
@@ -539,12 +577,15 @@ EOF
 run systemctl disable --now systemd-oomd.service || true
 run systemctl enable earlyoom.service
 
+info "Configuring SMART monitoring..."
+cat <<'EOF' | apply /etc/smartd.conf
+# Scan every SMART-capable device (Arch Wiki: S.M.A.R.T.)
+DEVICESCAN -a
+EOF
+
 info "Configuring ufw..."
 run ufw default deny incoming || true
 run ufw default allow outgoing || true
-# KDE Connect
-run ufw allow 1714:1764/udp || true
-run ufw allow 1714:1764/tcp || true
 if ! ufw status 2>/dev/null | grep -q '^Status: active'; then
     run ufw --force enable || fail "Could not enable ufw"
 fi
@@ -601,6 +642,11 @@ cat <<'EOF' | apply /etc/NetworkManager/conf.d/99-systemd-resolved.conf
 dns=systemd-resolved
 EOF
 run systemctl restart NetworkManager || true
+
+info "Enabling mDNS hostname resolution (Avahi)..."
+if ! grep -q 'mdns_minimal' /etc/nsswitch.conf 2>/dev/null; then
+    run sed -i '/^hosts:/ s/\bresolve\b/mdns_minimal [NOTFOUND=return] resolve/' /etc/nsswitch.conf
+fi
 
 info "Configuring the SDDM Wayland greeter..."
 cat <<'EOF' | apply /etc/sddm.conf.d/10-wayland.conf
@@ -689,7 +735,96 @@ optimize_btrfs_fstab() {
 optimize_btrfs_fstab
 
 # ==============================================================================
-# 14. BOOT (AMD microcode, initramfs, bootloader)
+# 14. POWER MANAGEMENT (TLP and the ASUS battery charge limit)
+# ==============================================================================
+info "Configuring TLP..."
+cat <<'EOF' | apply /etc/tlp.d/00-laptop.conf
+# ASUS VivoBook X409DA. Stop charging at 60% to slow wear on an aged battery.
+STOP_CHARGE_THRESH_BAT0=60
+EOF
+
+# TLP owns the radio kill switches.
+run systemctl mask systemd-rfkill.service systemd-rfkill.socket
+
+# ==============================================================================
+# 15. BTRFS SNAPSHOTS AND ROLLBACK
+# ==============================================================================
+setup_snapshots() {
+    if ! findmnt -no FSTYPE / | grep -q btrfs; then
+        warn "Root is not Btrfs; skipping the snapper configuration."
+        return 0
+    fi
+    if [ "$DRY_RUN" = 1 ]; then
+        info "[dry-run] would create the snapper root config and snapshot timers"
+        return 0
+    fi
+
+    if [ -f /etc/snapper/configs/root ]; then
+        ok "The snapper root config already exists."
+    elif [ -d /.snapshots ] && btrfs subvolume show /.snapshots >/dev/null 2>&1; then
+        # archinstall can leave @.snapshots mounted here. Reuse that subvolume,
+        # because snapper's create-config would try to make a second one and fail.
+        info "Reusing the existing /.snapshots subvolume."
+        mkdir -p /etc/snapper/configs
+        cp /usr/share/snapper/config-templates/default /etc/snapper/configs/root
+        sed -i 's|^SUBVOLUME=.*|SUBVOLUME="/"|' /etc/snapper/configs/root
+        if grep -q '^SNAPPER_CONFIGS=' /etc/conf.d/snapper; then
+            sed -i 's|^SNAPPER_CONFIGS=.*|SNAPPER_CONFIGS="root"|' /etc/conf.d/snapper
+        else
+            echo 'SNAPPER_CONFIGS="root"' >> /etc/conf.d/snapper
+        fi
+    else
+        snapper -c root create-config / || { fail "snapper create-config failed"; return 0; }
+    fi
+
+    # Tighten whichever configs exist; archinstall may create root and home.
+    # The template default is 10 hourly and 10 daily snapshots.
+    for cfg in root home; do
+        if [ -f "/etc/snapper/configs/$cfg" ]; then
+            sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="5"/' "/etc/snapper/configs/$cfg"
+            sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="7"/' "/etc/snapper/configs/$cfg"
+        fi
+    done
+
+    if snapper -c root list >/dev/null 2>&1; then
+        ok "Snapper is active: pre/post snapshots on every pacman transaction."
+    else
+        fail "The snapper root config is not usable."
+    fi
+}
+setup_snapshots
+
+# ==============================================================================
+# 16. APPARMOR
+# ==============================================================================
+add_kernel_param() {
+    local param="$1"
+    if [ -f /etc/default/grub ] && grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
+        if ! grep -q "$param" /etc/default/grub; then
+            run sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"|GRUB_CMDLINE_LINUX_DEFAULT=\"\1 $param\"|" /etc/default/grub
+        fi
+    fi
+    if [ -f /etc/kernel/cmdline ] && ! grep -q "$param" /etc/kernel/cmdline; then
+        run bash -c "echo ' $param' >> /etc/kernel/cmdline"
+    fi
+    local entry
+    for entry in /boot/loader/entries/*.conf; do
+        [ -f "$entry" ] || continue
+        if ! grep -q "$param" "$entry"; then
+            run sed -i "s|^options \(.*\)|options \1 $param|" "$entry"
+        fi
+    done
+}
+
+info "Enabling AppArmor as the default LSM..."
+if [ "$DRY_RUN" = 1 ] || [ -f /etc/default/grub ] || [ -f /etc/kernel/cmdline ] || compgen -G "/boot/loader/entries/*.conf" >/dev/null; then
+    add_kernel_param "lsm=landlock,lockdown,yama,integrity,apparmor,bpf"
+else
+    warn "No kernel command line found; add lsm=landlock,lockdown,yama,integrity,apparmor,bpf manually."
+fi
+
+# ==============================================================================
+# 17. BOOT (AMD microcode, initramfs, bootloader)
 # ==============================================================================
 if [ "$DRY_RUN" = 1 ] || pacman -Q amd-ucode >/dev/null 2>&1; then
     info "Ensuring the microcode hook is enabled and rebuilding the initramfs..."
@@ -752,7 +887,8 @@ SERVICES=(
     NetworkManager.service
     systemd-resolved.service
     systemd-timesyncd.service
-    power-profiles-daemon.service
+    tlp.service
+    tlp-pd.service
     earlyoom.service
     ufw.service
     bluetooth.service
@@ -760,6 +896,15 @@ SERVICES=(
     fstrim.timer
     paccache.timer
     reflector.timer
+    arch-audit.timer
+    smartd.service
+    apparmor.service
+    snapper-timeline.timer
+    snapper-cleanup.timer
+    btrfs-scrub.timer
+    avahi-daemon.service
+    irqbalance.service
+    fwupd-refresh.timer
 )
 for svc in "${SERVICES[@]}"; do
     if [ "$DRY_RUN" = 1 ]; then
@@ -770,6 +915,10 @@ for svc in "${SERVICES[@]}"; do
         warn "Could not enable $svc"
     fi
 done
+
+if [ -f /etc/default/grub ] && command -v grub-mkconfig >/dev/null 2>&1; then
+    run systemctl enable grub-btrfsd.service || warn "Could not enable grub-btrfsd.service"
+fi
 
 run systemctl daemon-reload || true
 if ! run systemctl start systemd-zram-setup@zram0.service; then
@@ -792,7 +941,9 @@ echo "  node -v                  # Active Node.js version (fnm)"
 echo "  java --version           # Latest OpenJDK SDK"
 echo "  vainfo                   # AMD VCN VA-API acceleration"
 echo "  vulkaninfo --summary     # Radeon Vulkan"
-echo "  powerprofilesctl get     # Power profile"
+echo "  tlp-stat -b              # Battery state and charge threshold"
+echo "  snapper list             # Btrfs snapshots"
+echo "  aa-status                # AppArmor profiles"
 echo "  ufw status               # Firewall"
 echo "  resolvectl status        # DNS-over-TLS state"
 echo "  zramctl                  # Compressed swap"
