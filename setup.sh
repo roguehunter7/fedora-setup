@@ -314,6 +314,7 @@ PACKAGES=(
 
     # --- Network discovery and lean system services ---
     ufw earlyoom networkmanager
+    cloudflared
     zram-generator pacman-contrib flatpak fwupd
     avahi nss-mdns irqbalance
 

@@ -76,7 +76,7 @@ and the run is logged to `/var/log/arch-setup-<timestamp>.log`.
 - **Storage** — Btrfs root remounted with `noatime,compress=zstd:1` after `findmnt --verify` accepts the new fstab, makepkg builds in `/tmp`, Firefox disk cache disabled.
 - **Desktop** — dark Breeze, empty session on login, doubled animation speed, Super+Space for KRunner, Baloo indexing off, SDDM on Wayland, LibreOffice with Colibre icons, tabbed UI and OOXML save defaults.
 - **Shell and fonts** — zsh as the login shell with Starship, autosuggestions, syntax highlighting, history substring search, completions and fzf; Fira Code Nerd Font from the repos, Microsoft core fonts, and sub-pixel RGB rendering with the LCD filter turned on.
-- **Network** — systemd-resolved on Cloudflare with opportunistic DNS-over-TLS, NetworkManager pointed at resolved, systemd-timesyncd, and Avahi with `nss-mdns` for `.local` discovery.
+- **Network** — systemd-resolved on Cloudflare with opportunistic DNS-over-TLS, NetworkManager pointed at resolved, systemd-timesyncd, Avahi with `nss-mdns` for `.local` discovery, and `cloudflared` for tunnels.
 - **Power** — TLP with a 60% charge limit for this laptop's battery, radio kill-switch handling and `lm_sensors`. `power-profiles-daemon` is removed; `tlp-pd` provides the D-Bus power profiles KDE expects.
 - **Snapshots** — `snapper` and `snap-pac` take a pre/post snapshot of `/` on every pacman transaction, `grub-btrfs` lists them in the GRUB menu, `btrfs-assistant` is the GUI, and `btrfs-scrub.timer` runs monthly scrubs.
 - **Security** — AppArmor enabled as a default LSM via the kernel command line, `arch-audit.timer`, `smartd`, and ufw.
