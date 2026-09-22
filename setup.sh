@@ -1,244 +1,350 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Fedora Workstation (GNOME) - Post-Install Setup
+# Arch Linux (KDE Plasma 6) - Post-Install Setup
 # ==============================================================================
-# Target   : Fresh Fedora Workstation install (GNOME Wayland)
-# Hardware : AMD Ryzen/Picasso laptop (amdgpu, Vega 8, VCN)
+# Target   : Fresh Arch Linux install (KDE Plasma 6, Wayland, GRUB)
+# Hardware : AMD Ryzen 5 3500U / 8GB RAM / NVMe SSD / Btrfs
 # Shell    : Zsh + Starship + FZF
-# Browser  : Brave Origin (native RPM with PWAs + Widevine DRM, no AI/Crypto)
-# Node     : Fast Node Manager (fnm) -> Latest Node.js and npm (clean, use npx)
+# Browser  : Firefox
+# Node     : Fast Node Manager (fnm) -> latest Node.js (clean, use npx)
+# Java     : latest OpenJDK SDK (jdk-openjdk)
+# Boot     : GRUB or systemd-boot (auto-detected); AMD microcode via mkinitcpio
+# ==============================================================================
+# Lean philosophy: a curated package set instead of plasma-meta / gnome-meta.
+# Mirrors the Fedora setup's tuning, shell, fonts, DNS and SSD work.
+# Hibernation is intentionally not supported (zram-only swap).
+# ==============================================================================
+# Usage: sudo ./setup.sh [--dry-run] [--no-reboot]
 # ==============================================================================
 
-{
 set -euo pipefail
-FAILURES=0
+exec < /dev/null
 
-# Ensure script is run with sudo
-if [ "$(id -u)" -ne 0 ]; then
-    echo "Error: This script must be run with root privileges (sudo)." >&2
+DRY_RUN=0
+DO_REBOOT=1
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run)   DRY_RUN=1 ;;
+        --no-reboot) DO_REBOOT=0 ;;
+        -h|--help)
+            cat <<'USAGE'
+Usage: sudo ./setup.sh [options]
+
+  --dry-run     Print what would be done. Nothing is installed or written.
+  --no-reboot   Do not reboot when the script finishes.
+  -h, --help    Show this help.
+USAGE
+            exit 0
+            ;;
+        *)
+            printf 'Unknown option: %s\n' "$arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
+BOLD="$(tput bold 2>/dev/null || true)"
+GREEN="$(tput setaf 2 2>/dev/null || true)"
+BLUE="$(tput setaf 4 2>/dev/null || true)"
+YELLOW="$(tput setaf 3 2>/dev/null || true)"
+RED="$(tput setaf 1 2>/dev/null || true)"
+RESET="$(tput sgr0 2>/dev/null || true)"
+
+info() { printf '%s\n' "${BLUE}${BOLD}[INFO]${RESET} $*"; }
+ok()   { printf '%s\n' "${GREEN}${BOLD}[ OK ]${RESET} $*"; }
+warn() { printf '%s\n' "${YELLOW}${BOLD}[WARN]${RESET} $*" >&2; }
+err()  { printf '%s\n' "${RED}${BOLD}[FAIL]${RESET} $*" >&2; }
+
+FAILURES=0
+fail() { FAILURES=$((FAILURES + 1)); err "$*"; }
+
+# ------------------------------------------------------------------------------
+# Preconditions
+# ------------------------------------------------------------------------------
+if [ ! -f /etc/arch-release ]; then
+    err "This script targets Arch Linux (/etc/arch-release not found)."
     exit 1
 fi
 
-exec < /dev/null
+if [ "$(id -u)" -ne 0 ]; then
+    err "This script must be run with root privileges: sudo ./setup.sh"
+    exit 1
+fi
 
-# ==============================================================================
-# USER DISCOVERY
-# ==============================================================================
-TARGET_USER="${SUDO_USER:-$(whoami)}"
+LOG_FILE="/var/log/arch-setup-$(date +%Y%m%d-%H%M%S).log"
+if [ "$DRY_RUN" = 0 ]; then
+    exec > >(tee -a "$LOG_FILE") 2>&1
+    info "Logging to $LOG_FILE"
+fi
+
+TARGET_USER="${SUDO_USER:-$(id -un)}"
 if [ "$TARGET_USER" = "root" ]; then
-    echo "Warning: Running as root directly. Settings will be applied to /root."
+    warn "Running directly as root. AUR builds and user dotfiles need a normal sudo user."
     TARGET_HOME="/root"
     TARGET_GROUP="root"
 else
-    TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
-    TARGET_GROUP=$(id -gn "$TARGET_USER")
+    TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+    TARGET_GROUP="$(id -gn "$TARGET_USER")"
 fi
-echo "--> Target User: $TARGET_USER  |  Home: $TARGET_HOME"
-
-# ==============================================================================
-# 1. DNF 5 SPEEDUPS (KISS Drop-in)
-# ==============================================================================
-echo "--> Configuring DNF (parallel downloads, fastest mirror, assume yes)..."
-mkdir -p /etc/dnf/libdnf5.conf.d
-cat <<EOF > /etc/dnf/libdnf5.conf.d/80-parallel-downloads.conf
-[main]
-max_parallel_downloads = 10
-fastestmirror = True
-assumeyes = True
-EOF
-chmod 0644 /etc/dnf/libdnf5.conf.d/80-parallel-downloads.conf
-
-# ==============================================================================
-# 2. BASE SYSTEM UPGRADE
-# ==============================================================================
-echo "--> Refreshing and upgrading system packages..."
-dnf upgrade -y --refresh || { FAILURES=$((FAILURES+1)); echo "  !! Upgrade encountered an issue"; }
-
-# ==============================================================================
-# 3. REPOSITORIES
-# ==============================================================================
-FEDORA_VERSION=$(rpm -E %fedora)
-
-echo "--> Installing RPM Fusion Free and Nonfree repositories..."
-dnf install -y \
-    "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_VERSION}.noarch.rpm" \
-    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${FEDORA_VERSION}.noarch.rpm" || { FAILURES=$((FAILURES+1)); echo "  !! RPM Fusion install failed"; }
-
-# Disable duplicate Workstation repos (Steam and NVIDIA are provided by full RPM Fusion).
-# Fedora 45 relocates packaged repos to /usr/share/dnf5/repos.d, so use a DNF5 override drop-in.
-if [ -f /etc/yum.repos.d/fedora-workstation-repositories.repo ] || \
-   [ -f /usr/share/dnf5/repos.d/fedora-workstation-repositories.repo ]; then
-    echo "--> Disabling duplicate Workstation repositories..."
-    mkdir -p /etc/dnf/repos.override.d
-    cat <<EOF > /etc/dnf/repos.override.d/99-disable-duplicates.repo
-[rpmfusion-nonfree-nvidia-driver]
-enabled=0
-[rpmfusion-steam]
-enabled=0
-EOF
-    chmod 0644 /etc/dnf/repos.override.d/99-disable-duplicates.repo
+info "Target user: $TARGET_USER  |  Home: $TARGET_HOME"
+if [ "$DRY_RUN" = 1 ]; then
+    warn "DRY RUN: nothing will be installed, written, enabled, or rebooted."
 fi
 
-mkdir -p /etc/yum.repos.d
+# ------------------------------------------------------------------------------
+# Action helpers (dry-run aware)
+# ------------------------------------------------------------------------------
+run() {
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '  [dry-run] %s\n' "$*"
+        return 0
+    fi
+    "$@"
+}
 
-echo "--> Adding Brave Browser repository..."
-cat <<EOF > /etc/yum.repos.d/brave-browser.repo
-[brave-browser]
-name=Brave Browser
-baseurl=https://brave-browser-rpm-release.s3.brave.com/x86_64/
-enabled=1
-gpgcheck=1
-gpgkey=https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
-EOF
+# Like run(), but records a failure instead of aborting the script.
+try() { run "$@" || fail "$*"; }
 
-echo "--> Adding VS Code repository..."
-cat <<EOF > /etc/yum.repos.d/vscode.repo
-[vscode]
-name=Visual Studio Code
-baseurl=https://packages.microsoft.com/yumrepos/vscode
-gpgcheck=1
-gpgkey=https://packages.microsoft.com/keys/microsoft.asc
-enabled=1
-EOF
+# Replace a file's contents from stdin.
+apply() {
+    local path="$1"
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '  [dry-run] write %s\n' "$path"
+        cat > /dev/null
+        return 0
+    fi
+    mkdir -p "$(dirname "$path")"
+    cat > "$path"
+}
 
-echo "--> Adding Google Cloud CLI repository..."
-cat <<EOF > /etc/yum.repos.d/google-cloud-cli.repo
-[google-cloud-cli]
-name=Google Cloud CLI
-baseurl=https://packages.cloud.google.com/yum/repos/cloud-sdk-el9-\$basearch
-gpgcheck=1
-repo_gpgcheck=0
-gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-enabled=1
-EOF
+# Append stdin to a file.
+append_file() {
+    local path="$1"
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '  [dry-run] append %s\n' "$path"
+        cat > /dev/null
+        return 0
+    fi
+    cat >> "$path"
+}
+
+# ------------------------------------------------------------------------------
+# Backups
+# ------------------------------------------------------------------------------
+BACKUP_DIR="/var/backups/arch-setup-$(date +%Y%m%d-%H%M%S)"
+backup_file() {
+    local f="$1"
+    [ -e "$f" ] || return 0
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '  [dry-run] backup %s\n' "$f"
+        return 0
+    fi
+    mkdir -p "$BACKUP_DIR"
+    cp -a "$f" "$BACKUP_DIR/$(printf '%s' "${f#/}" | tr '/' '_')"
+}
+
+info "Backing up files this script may overwrite..."
+for f in \
+    /etc/pacman.conf /etc/pacman.d/mirrorlist /etc/fstab \
+    /etc/default/grub /boot/grub/grub.cfg /etc/mkinitcpio.conf \
+    /boot/loader/loader.conf /etc/kernel/cmdline \
+    /etc/makepkg.conf /etc/sudoers.d/pwfeedback \
+    /etc/systemd/zram-generator.conf /etc/sysctl.d/99-performance.conf \
+    /etc/default/earlyoom /etc/xdg/baloofilerc \
+    /etc/systemd/journald.conf.d /etc/systemd/resolved.conf.d \
+    /etc/NetworkManager/conf.d /etc/sddm.conf.d /etc/firefox/policies; do
+    backup_file "$f"
+done
+[ "$DRY_RUN" = 1 ] || ok "Backups stored in $BACKUP_DIR"
+
+as_user() { sudo -u "$TARGET_USER" "$@"; }
+
+# Clone an AUR package, build it as the target user, then install as root.
+# Avoids yay's internal sudo (which cannot prompt: stdin is /dev/null).
+aur_install() {
+    local pkg="$1"
+    local base="/tmp/aur-build"
+    local dir="$base/$pkg"
+
+    if pacman -Q "$pkg" >/dev/null 2>&1; then
+        ok "$pkg already installed."
+        return 0
+    fi
+    if [ "$DRY_RUN" = 1 ]; then
+        info "[dry-run] would build and install AUR package: $pkg"
+        return 0
+    fi
+
+    run as_user mkdir -p "$base"
+    run rm -rf "$dir"
+    run as_user git clone --depth=1 "https://aur.archlinux.org/${pkg}.git" "$dir" \
+        || { fail "Could not clone AUR package: $pkg"; return 0; }
+    ( cd "$dir" && run as_user makepkg --noconfirm ) \
+        || { fail "makepkg failed for AUR package: $pkg"; rm -rf "$dir"; return 0; }
+    run pacman -U --noconfirm --needed "$dir"/*.pkg.tar.zst \
+        || fail "Could not install AUR package: $pkg"
+    run rm -rf "$dir"
+}
 
 # ==============================================================================
-# 4. MULTIMEDIA and HARDWARE ACCELERATION (AMD Picasso / Vega 8)
+# 1. PACMAN CONFIGURATION, MIRRORS & MULTILIB
 # ==============================================================================
-echo "--> Swapping ffmpeg-free with full ffmpeg..."
-dnf install -y ffmpeg --allowerasing --allow-vendor-change || { FAILURES=$((FAILURES+1)); echo "  !! ffmpeg swap failed"; }
+info "Configuring /etc/pacman.conf (Color, ParallelDownloads, multilib)..."
 
-echo "--> Installing RPM Fusion multimedia group..."
-dnf group install -y "multimedia" --setopt=install_weak_deps=False --exclude=PackageKit-gstreamer-plugin || { FAILURES=$((FAILURES+1)); echo "  !! multimedia group install failed"; }
+run sed -i 's/^#Color$/Color/' /etc/pacman.conf
+grep -q '^Color$' /etc/pacman.conf || run sed -i '/^\[options\]/a Color' /etc/pacman.conf
 
-echo "--> Installing sound-and-video group..."
-dnf group install -y "sound-and-video" || { FAILURES=$((FAILURES+1)); echo "  !! sound-and-video group install failed"; }
+run sed -i 's/^#ParallelDownloads.*/ParallelDownloads = 10/' /etc/pacman.conf
+grep -q '^ParallelDownloads' /etc/pacman.conf || run sed -i '/^\[options\]/a ParallelDownloads = 10' /etc/pacman.conf
 
-echo "--> Swapping in freeworld Mesa Vulkan drivers (Vulkan Video H.264/H.265)..."
-if rpm -q mesa-vulkan-drivers >/dev/null 2>&1 && ! rpm -q mesa-vulkan-drivers-freeworld >/dev/null 2>&1; then
-    dnf swap -y --allow-vendor-change mesa-vulkan-drivers mesa-vulkan-drivers-freeworld || { FAILURES=$((FAILURES+1)); echo "  !! mesa-vulkan-drivers freeworld swap failed"; }
+run sed -i 's/^#ILoveCandy$/ILoveCandy/' /etc/pacman.conf
+
+# Enable [multilib] for 32-bit Steam / Wine / Vulkan
+if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
+    run sed -i '/^#\[multilib\]/,/^#Include = \/etc\/pacman.d\/mirrorlist/ s/^#//' /etc/pacman.conf
+fi
+grep -q '^\[multilib\]' /etc/pacman.conf && ok "[multilib] enabled." || fail "Could not enable [multilib]"
+
+run chmod 0644 /etc/pacman.conf
+
+info "Installing bootstrap tools and reflector..."
+run pacman -S --needed --noconfirm base-devel git curl wget cabextract btrfs-progs reflector \
+    || fail "Bootstrap package install failed"
+
+info "Ranking HTTPS mirrors (backup kept in $BACKUP_DIR)..."
+if command -v reflector >/dev/null 2>&1 && [ "$DRY_RUN" = 0 ]; then
+    reflector --latest 20 --protocol https --sort rate --save /etc/pacman.d/mirrorlist \
+        || warn "reflector failed; keeping the existing mirrorlist"
+fi
+
+info "Synchronizing repositories and upgrading the system..."
+run pacman -Syu --noconfirm || fail "System upgrade failed"
+
+# ==============================================================================
+# 2. AUR HELPER (yay-bin)
+# ==============================================================================
+if command -v yay >/dev/null 2>&1 || command -v paru >/dev/null 2>&1; then
+    ok "AUR helper already present."
+elif [ "$TARGET_USER" = "root" ]; then
+    warn "Skipping yay-bin build (no normal sudo user)."
 else
-    echo "    (already on mesa-vulkan-drivers-freeworld, or stock driver not present)"
+    info "Building yay-bin from the AUR..."
+    aur_install yay-bin
+    command -v yay >/dev/null 2>&1 && ok "yay-bin installed."
 fi
 
 # ==============================================================================
-# 5. CORE PACKAGES and TOOLS
+# 3. LEAN PLASMA 6 + DEV + GRAPHICS + CODECS + AUDIO
 # ==============================================================================
-echo "--> Installing Brave Origin, AMD hardware acceleration, and developer tools..."
-PKGS=(
-    # Hardware acceleration for AMD VCN 1.0 / Vega 8
-    mesa-dri-drivers mesa-va-drivers-freeworld libva libva-utils ffmpeg-libs
-    # Primary browser and desktop apps
-    brave-origin mpv gnome-boxes code google-cloud-cli libreoffice
-    # GNOME Shell extensions available as Fedora packages
-    gnome-shell-extension-appindicator gnome-shell-extension-blur-my-shell
-    gnome-shell-extension-dash-to-dock gnome-shell-extension-status-icons
-    # Build tools, AppImage runtime (fuse-libs) and shell utilities
-    @development-tools python3 python3-pip python3-gobject distrobox git curl unzip zsh zsh-autosuggestions zsh-syntax-highlighting fzf fuse-libs
-    # Archives and fonts (cabextract required by Microsoft Core Fonts)
-    flatpak cabextract mkfontscale fontconfig 7zip 7zip-standalone
-    google-carlito-fonts google-crosextra-caladea-fonts
+info "Installing the curated package set (this is the long step)..."
+
+PACKAGES=(
+    # --- Minimal Plasma 6: plasma-desktop, not plasma-meta ---
+    plasma-desktop plasma-workspace plasma-nm plasma-pa
+    power-profiles-daemon kscreen kwin bluedevil
+    sddm sddm-kcm breeze breeze-gtk kde-gtk-config
+    xdg-desktop-portal-kde qt6-wayland kwallet kwallet-pam
+    kwalletmanager plasma-browser-integration
+    dolphin konsole kate gwenview spectacle ark
+    kdegraphics-thumbnailers ffmpegthumbs kimageformats
+    print-manager kdeconnect
+
+    # --- Build toolchain & languages ---
+    cmake ninja clang gdb cpupower
+    python python-pip python-virtualenv
+    jdk-openjdk
+    go rust
+    fnm
+
+    # --- AMD Ryzen 3500U (Picasso / Vega 8) + CPU microcode ---
+    amd-ucode
+    mesa lib32-mesa
+    vulkan-radeon lib32-vulkan-radeon vulkan-tools
+    libva libva-utils
+
+    # --- Multimedia codec suite ---
+    ffmpeg
+    gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly
+    gst-libav gst-plugin-va
+    dav1d libheif libavif libjxl webp-pixbuf-loader
+    mpv
+
+    # --- Audio: PipeWire, 32-bit support, laptop firmware ---
+    pipewire wireplumber pipewire-audio pipewire-pulse pipewire-alsa
+    lib32-pipewire
+    sof-firmware alsa-ucm-conf alsa-utils
+    bluez-utils
+
+    # --- Daily drivers ---
+    firefox qbittorrent libreoffice-fresh
+    7zip unzip xdg-user-dirs
+
+    # --- Printing (socket-activated) ---
+    cups
+
+    # --- Lean system services ---
+    ufw earlyoom networkmanager systemd-resolvconf
+    zram-generator pacman-contrib flatpak fwupd powertop
+
+    # --- Shell & documentation ---
+    zsh zsh-autosuggestions zsh-syntax-highlighting fzf starship
+    bash-completion man-db man-pages fastfetch
+
+    # --- Fonts ---
+    noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-dejavu
+    ttf-carlito ttf-caladea ttf-croscore
 )
 
-dnf install -y "${PKGS[@]}" || { FAILURES=$((FAILURES+1)); echo "  !! Package installation failed"; }
+run pacman -S --needed --noconfirm "${PACKAGES[@]}" || fail "Package installation failed"
 
-# Firmware updates
-if command -v fwupdmgr >/dev/null 2>&1; then
-    echo "--> Checking for firmware updates..."
-    fwupdmgr refresh --force || true
-    fwupdmgr update -y || true
+if pacman -Q tlp >/dev/null 2>&1; then
+    warn "TLP is installed and conflicts with power-profiles-daemon. Remove one of them."
 fi
 
 # ==============================================================================
-# 6. SYSTEM TUNING (KISS)
+# 4. AUR: MICROSOFT CORE FONTS
 # ==============================================================================
-echo "--> Disabling NetworkManager-wait-online.service..."
-systemctl disable NetworkManager-wait-online.service || true
-
-echo "--> Capping systemd journal size to 500MB..."
-mkdir -p /etc/systemd/journald.conf.d
-cat <<EOF > /etc/systemd/journald.conf.d/99-size.conf
-[Journal]
-SystemMaxUse=500M
-EOF
-systemctl restart systemd-journald || true
-
-echo "--> Setting GRUB timeout to 2 seconds..."
-if [ -f /etc/default/grub ]; then
-    sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub || echo 'GRUB_TIMEOUT=2' >> /etc/default/grub
-    if [ -f /boot/grub2/grub.cfg ]; then
-        grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1 || true
-    fi
+if [ "$TARGET_USER" != "root" ]; then
+    info "Installing Microsoft core fonts from the AUR..."
+    aur_install ttf-ms-fonts
+    run fc-cache -f || true
 fi
 
-echo "--> Disabling unneeded background services..."
-for svc in ModemManager cups abrtd; do
-    if systemctl list-unit-files "$svc.service" >/dev/null 2>&1; then
-        systemctl disable --now "$svc.service" >/dev/null 2>&1 || true
-    fi
-done
-
-echo "--> Configuring zram (zstd, balanced size) via drop-in..."
-mkdir -p /etc/systemd/zram-generator.conf.d
-cat <<EOF > /etc/systemd/zram-generator.conf.d/99-zram.conf
-[zram0]
-zram-size = min(ram, 8192)
-compression-algorithm = zstd
-EOF
-chmod 0644 /etc/systemd/zram-generator.conf.d/99-zram.conf
-
-echo "--> Applying compressed-RAM kernel parameters..."
-cat <<EOF > /etc/sysctl.d/99-zram.conf
-vm.swappiness = 100
-vm.watermark_boost_factor = 0
-vm.watermark_scale_factor = 125
-vm.page-cluster = 0
-EOF
-chmod 0644 /etc/sysctl.d/99-zram.conf
-sysctl --system >/dev/null 2>&1 || true
-
 # ==============================================================================
-# 7. FLATPAK (Flathub Only)
+# 5. NODE.JS VIA FNM (latest, zero global npm packages)
 # ==============================================================================
-echo "--> Configuring Flatpak..."
-flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
-if flatpak remote-list | grep -q '^fedora'; then
-    flatpak remote-delete fedora || true
+if [ "$TARGET_USER" != "root" ] && command -v fnm >/dev/null 2>&1; then
+    info "Installing the latest Node.js via fnm..."
+    run as_user bash -c '
+        eval "$(fnm env --shell bash)"
+        fnm install --latest
+        LATEST="$(fnm ls | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | sort -V | tail -1)"
+        [ -n "$LATEST" ] && fnm default "$LATEST"
+    ' || fail "Node.js installation via fnm failed"
 fi
-flatpak update -y || true
 
 # ==============================================================================
-# 8. ZSH SHELL, STARSHIP and FZF
+# 6. ZSH, STARSHIP AND FZF
 # ==============================================================================
-echo "--> Installing Starship prompt..."
-curl -sS https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin || { FAILURES=$((FAILURES+1)); echo "  !! Starship install failed"; }
-
 if [ "$TARGET_USER" != "root" ]; then
     ZSH_BIN="$(command -v zsh || true)"
     if [ -n "$ZSH_BIN" ]; then
-        echo "--> Setting zsh as the default shell for $TARGET_USER..."
-        grep -qx "$ZSH_BIN" /etc/shells || echo "$ZSH_BIN" >> /etc/shells
+        info "Setting zsh as the default shell for $TARGET_USER..."
+        grep -qx "$ZSH_BIN" /etc/shells || run bash -c "echo '$ZSH_BIN' >> /etc/shells"
         if [ "$(getent passwd "$TARGET_USER" | cut -d: -f7)" != "$ZSH_BIN" ]; then
-            chsh -s "$ZSH_BIN" "$TARGET_USER" || { FAILURES=$((FAILURES+1)); echo "  !! chsh to zsh failed"; }
+            run chsh -s "$ZSH_BIN" "$TARGET_USER" || fail "chsh to zsh failed"
         fi
     else
-        FAILURES=$((FAILURES+1)); echo "  !! zsh not found; skipping shell switch"
+        fail "zsh not found; skipping shell switch"
     fi
 
-    echo "--> Writing ~/.zshrc..."
+    info "Writing the ~/.zshrc setup block..."
     ZSHRC_FILE="$TARGET_HOME/.zshrc"
     if ! grep -q 'BEGIN SETUP BLOCKS' "$ZSHRC_FILE" 2>/dev/null; then
-        cat <<'ZSHBLOCK' >> "$ZSHRC_FILE"
+        cat <<'ZSHBLOCK' | append_file "$ZSHRC_FILE"
 
 # BEGIN SETUP BLOCKS
 # Node.js (fnm) and local binaries
@@ -265,9 +371,9 @@ unsetopt nomatch
 
 # Prompt and plugins
 eval "$(starship init zsh)"
-source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-source /usr/share/fzf/shell/key-bindings.zsh
+[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/fzf/shell/key-bindings.zsh ] && source /usr/share/fzf/shell/key-bindings.zsh
 
 # Ctrl + Arrow keybindings
 bindkey "^[[1;5D" backward-word
@@ -287,58 +393,59 @@ bindkey '^[[F' end-of-line
 # END SETUP BLOCKS
 ZSHBLOCK
     fi
-    chown "$TARGET_USER":"$TARGET_GROUP" "$ZSHRC_FILE"
+    run chown "$TARGET_USER":"$TARGET_GROUP" "$ZSHRC_FILE"
 fi
 
 # ==============================================================================
-# 9. NODE.JS VIA FNM (Latest Version - Clean, Zero Global NPM Packages)
+# 7. KDE PLASMA 6 DESKTOP POLISH
 # ==============================================================================
-if [ "$TARGET_USER" != "root" ]; then
-    echo "--> Installing fnm (Fast Node Manager) for $TARGET_USER..."
-    sudo -u "$TARGET_USER" bash -c 'curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell' || { FAILURES=$((FAILURES+1)); echo "  !! fnm install failed"; }
+if [ "$TARGET_USER" != "root" ] && command -v kwriteconfig6 >/dev/null 2>&1; then
+    info "Applying KDE Plasma preferences for $TARGET_USER..."
+    run mkdir -p "$TARGET_HOME/.config"
 
-    echo "--> Installing latest Node.js release and setting as default..."
-    sudo -u "$TARGET_USER" bash -c '
-        export PATH="$HOME/.local/share/fnm:$PATH"
-        eval "$("$HOME/.local/share/fnm/fnm" env --shell zsh)"
-        fnm install --latest
-        fnm default latest
-    ' || { FAILURES=$((FAILURES+1)); echo "  !! Node.js installation via fnm failed"; }
-fi
+    # Dark Breeze theme on next login
+    try as_user kwriteconfig6 --file kdeglobals --group General --key ColorScheme BreezeDark
+    try as_user kwriteconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage org.kde.breezedark.desktop
 
-# ==============================================================================
-# 10. GNOME PREFERENCES and DESKTOP POLISH
-# ==============================================================================
-if [ "$TARGET_USER" != "root" ]; then
-    echo "--> Setting GNOME interface to prefer dark theme..."
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' || true
+    # Fast boot: start with an empty session instead of restoring apps
+    try as_user kwriteconfig6 --file ksmserverrc --group General --key loginMode emptySession
 
-    echo "--> Enabling volume overamplification (allows up to 150%)..."
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.sound allow-volume-above-100-percent true || true
+    # Double UI animation speed
+    try as_user kwriteconfig6 --file kdeglobals --group KDE --key AnimationDurationFactor 0.5
 
-    echo "--> Enabling three window buttons (minimize, maximize, close)..."
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close' || true
+    # Super+Space opens KRunner (defaults preserved)
+    try as_user kwriteconfig6 --file kglobalshortcutsrc --group krunner.desktop \
+        --key _launch 'Alt+Space\tAlt+F2,Meta+Space\tAlt+Space\tAlt+F2,KRunner'
 
-    echo "--> Enabling two-finger touchpad scrolling..."
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad two-finger-scrolling-enabled true || true
+    info "Disabling the Baloo file indexer (plasma-desktop pulls it in)..."
+    cat <<'EOF' | apply "$TARGET_HOME/.config/baloofilerc"
+[Basic Settings]
+Indexing-Enabled=false
+EOF
+    cat <<'EOF' | apply /etc/xdg/baloofilerc
+[Basic Settings]
+Indexing-Enabled=false
+EOF
 
-    echo "--> Disabling GNOME Software background autostart & search provider (saving ~500MB RAM)..."
-    mkdir -p "$TARGET_HOME/.config/autostart"
-    if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
-        cp -f /usr/share/applications/org.gnome.Software.desktop "$TARGET_HOME/.config/autostart/"
-        echo "X-GNOME-Autostart-enabled=false" >> "$TARGET_HOME/.config/autostart/org.gnome.Software.desktop"
+    run chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config"
+
+    # Sync cursor theme into the SDDM greeter
+    run mkdir -p /var/lib/sddm/.config
+    if [ -f "$TARGET_HOME/.config/kcminputrc" ]; then
+        run cp -f "$TARGET_HOME/.config/kcminputrc" /var/lib/sddm/.config/kcminputrc
+        run chown -R sddm:sddm /var/lib/sddm/.config
     fi
-    chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config/autostart"
-    sudo -u "$TARGET_USER" dbus-run-session gsettings set org.gnome.desktop.search-providers disabled "['org.gnome.Software.desktop']" 2>/dev/null || true
+    ok "KDE desktop preferences applied."
 fi
 
-# LibreOffice: MS Office-like look (Colibre icons, tabbed ribbon UI, OOXML defaults)
+# ==============================================================================
+# 8. LIBREOFFICE (MS Office-like look: Colibre icons, tabbed UI, OOXML defaults)
+# ==============================================================================
 if [ "$TARGET_USER" != "root" ] && command -v libreoffice >/dev/null 2>&1; then
     LO_XCU="$TARGET_HOME/.config/libreoffice/4/user/registrymodifications.xcu"
     if [ ! -f "$LO_XCU" ]; then
-        echo "--> Configuring LibreOffice (Colibre icons, tabbed UI, OOXML defaults)..."
-        mkdir -p "$(dirname "$LO_XCU")"
-        cat <<'EOF' > "$LO_XCU"
+        info "Configuring LibreOffice defaults for $TARGET_USER..."
+        cat <<'EOF' | apply "$LO_XCU"
 <?xml version="1.0" encoding="UTF-8"?>
 <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
  <item oor:path="/org.openoffice.Office.Common/Misc"><prop oor:name="FirstRun" oor:op="fuse"><value>false</value></prop></item>
@@ -355,115 +462,319 @@ if [ "$TARGET_USER" != "root" ] && command -v libreoffice >/dev/null 2>&1; then
  <item oor:path="/org.openoffice.Setup/Office/Factories/org.openoffice.Setup:Factory[com.sun.star.presentation.PresentationDocument]"><prop oor:name="ooSetupFactoryDefaultFilter" oor:op="fuse"><value>Impress MS PowerPoint 2007 XML</value></prop></item>
 </oor:items>
 EOF
-        chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config/libreoffice"
+        run chown -R "$TARGET_USER":"$TARGET_GROUP" "$TARGET_HOME/.config/libreoffice"
     fi
 fi
 
-# GNOME Shell extensions (RPM ones installed above; these two are catalog-only)
-if [ "$TARGET_USER" != "root" ] && command -v gnome-shell >/dev/null 2>&1; then
-    GNOME_MAJOR="$(gnome-shell --version | awk '{print $3}' | cut -d. -f1)"
-    EXT_DIR="$TARGET_HOME/.local/share/gnome-shell/extensions"
-    mkdir -p "$EXT_DIR"
-
-    for uuid in copyous@boerdereinar.dev bluetooth-quick-connect@bjarosze.gmail.com; do
-        if [ -d "$EXT_DIR/$uuid" ]; then
-            echo "    (GNOME extension already present: $uuid)"
-            continue
-        fi
-        echo "--> Installing GNOME extension $uuid..."
-        EXT_URL="$(curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$uuid&shell_version=$GNOME_MAJOR" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("download_url",""))' 2>/dev/null || true)"
-        if [ -n "$EXT_URL" ]; then
-            EXT_ZIP="$(mktemp)"
-            if curl -fsSL "https://extensions.gnome.org$EXT_URL" -o "$EXT_ZIP"; then
-                mkdir -p "$EXT_DIR/$uuid"
-                unzip -oq "$EXT_ZIP" -d "$EXT_DIR/$uuid"
-                [ -d "$EXT_DIR/$uuid/schemas" ] && glib-compile-schemas "$EXT_DIR/$uuid/schemas" || true
-            else
-                FAILURES=$((FAILURES+1)); echo "  !! download failed: $uuid"
-            fi
-            rm -f "$EXT_ZIP"
-        else
-            FAILURES=$((FAILURES+1)); echo "  !! no build for GNOME $GNOME_MAJOR: $uuid"
-        fi
-    done
-    chown -R "$TARGET_USER":"$TARGET_GROUP" "$EXT_DIR"
-
-    echo "--> Enabling GNOME extensions..."
-    sudo -u "$TARGET_USER" dbus-run-session python3 - <<'PY' || true
-from gi.repository import Gio
-
-wanted = [
-    "appindicatorsupport@rgcjonas.gmail.com",
-    "blur-my-shell@aunetx",
-    "dash-to-dock@micxgx.gmail.com",
-    "status-icons@gnome-shell-extensions.gcampax.github.com",
-    "copyous@boerdereinar.dev",
-    "bluetooth-quick-connect@bjarosze.gmail.com",
-]
-settings = Gio.Settings.new("org.gnome.shell")
-current = list(settings.get_strv("enabled-extensions"))
-missing = [uuid for uuid in wanted if uuid not in current]
-if missing:
-    settings.set_strv("enabled-extensions", current + missing)
-PY
-fi
-
 # ==============================================================================
-# 11. FONTS (Fira Code Nerd Font and Microsoft Core Fonts)
+# 9. FONTS (Fira Code Nerd Font; MS fonts installed above)
 # ==============================================================================
 if [ "$TARGET_USER" != "root" ]; then
-    echo "--> Installing Fira Code Nerd Font..."
     FONT_DIR="$TARGET_HOME/.local/share/fonts"
-    mkdir -p "$FONT_DIR"
-    chown "$TARGET_USER":"$TARGET_GROUP" "$FONT_DIR"
-    chmod 0755 "$FONT_DIR"
+    run mkdir -p "$FONT_DIR"
+    run chown "$TARGET_USER":"$TARGET_GROUP" "$FONT_DIR"
+    run chmod 0755 "$FONT_DIR"
 
     if ! compgen -G "$FONT_DIR/FiraCode*.ttf" >/dev/null 2>&1; then
-        sudo -u "$TARGET_USER" curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz || true
+        info "Installing Fira Code Nerd Font..."
+        run as_user curl -fsSL -o "$TARGET_HOME/FiraCode.tar.xz" \
+            https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.tar.xz \
+            || warn "Fira Code download failed"
         if [ -f "$TARGET_HOME/FiraCode.tar.xz" ]; then
-            sudo -u "$TARGET_USER" tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR"
-            rm -f "$TARGET_HOME/FiraCode.tar.xz"
+            run as_user tar -xf "$TARGET_HOME/FiraCode.tar.xz" -C "$FONT_DIR" || warn "Fira Code extraction failed"
+            run rm -f "$TARGET_HOME/FiraCode.tar.xz"
         fi
     fi
 fi
+run fc-cache -f || true
 
-echo "--> Installing Microsoft Core Fonts..."
-MSRPM="/tmp/msttcore-fonts-installer-2.6-1.noarch.rpm"
-curl -fsSL -o "$MSRPM" https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm || true
-if [ -f "$MSRPM" ]; then
-    rpm -i --nosignature "$MSRPM" 2>/dev/null || true
-    rm -f "$MSRPM"
+# ==============================================================================
+# 10. SYSTEM TUNING
+# ==============================================================================
+info "Capping the systemd journal (200M; SystemKeepFree may cap it lower)..."
+cat <<'EOF' | apply /etc/systemd/journald.conf.d/99-ssd.conf
+[Journal]
+SystemMaxUse=200M
+SystemMaxFiles=5
+SyncIntervalSec=5m
+EOF
+run systemctl restart systemd-journald || true
+
+info "Configuring 1:1 zstd ZRAM..."
+if [ -f /etc/systemd/zram-generator.conf ]; then
+    info "Replacing the installer's zram configuration with a 1:1 size."
+fi
+cat <<'EOF' | apply /etc/systemd/zram-generator.conf
+[zram0]
+zram-size = ram
+compression-algorithm = zstd
+swap-priority = 100
+fs-type = swap
+EOF
+
+info "Applying kernel and memory sysctls..."
+cat <<'EOF' | apply /etc/sysctl.d/99-performance.conf
+# Aggressive swap into fast compressed ZRAM
+vm.swappiness = 180
+vm.page-cluster = 0
+vm.watermark_boost_factor = 0
+vm.watermark_scale_factor = 125
+
+# Proton / Steam / high-memory apps
+vm.max_map_count = 1048576
+
+# Keep directory and inode caches in RAM (low value on NVMe, harmless)
+vm.vfs_cache_pressure = 50
+
+# Inotify capacity
+fs.inotify.max_user_watches = 524288
+fs.inotify.max_user_instances = 8192
+EOF
+run sysctl --system || true
+
+info "Configuring earlyoom (systemd-oomd stays disabled)..."
+cat <<'EOF' | apply /etc/default/earlyoom
+EARLYOOM_ARGS="-m 5 -s 10 -r 60 --avoid '(^|/)(init|systemd|sddm|kwin_wayland|kwin|Xwayland|pipewire|wireplumber)$' --prefer '(^|/)(Web Content|firefox|chrome|electron)$'"
+EOF
+run systemctl disable --now systemd-oomd.service || true
+run systemctl enable earlyoom.service
+
+info "Configuring ufw..."
+run ufw default deny incoming || true
+run ufw default allow outgoing || true
+# KDE Connect
+run ufw allow 1714:1764/udp || true
+run ufw allow 1714:1764/tcp || true
+if ! ufw status 2>/dev/null | grep -q '^Status: active'; then
+    run ufw --force enable || fail "Could not enable ufw"
 fi
 
-echo "--> Refreshing font cache..."
-fc-cache -f || true
+info "Disabling boot-delaying and unused services..."
+run systemctl disable NetworkManager-wait-online.service || true
+if systemctl list-unit-files ModemManager.service >/dev/null 2>&1; then
+    run systemctl disable --now ModemManager.service || true
+fi
 
 # ==============================================================================
-# 12. USABILITY POLISH
+# 11. SSD LONGEVITY (makepkg builds in RAM, Firefox cache in RAM)
 # ==============================================================================
-echo "--> Enabling sudo password feedback asterisks..."
-echo "Defaults pwfeedback" > /etc/sudoers.d/pwfeedback
-chmod 0440 /etc/sudoers.d/pwfeedback
+info "Moving makepkg builds to /tmp..."
+if grep -q '^#BUILDDIR=/tmp/makepkg' /etc/makepkg.conf 2>/dev/null; then
+    run sed -i 's|^#BUILDDIR=/tmp/makepkg|BUILDDIR=/tmp/makepkg|' /etc/makepkg.conf
+elif ! grep -q '^BUILDDIR=' /etc/makepkg.conf 2>/dev/null; then
+    run bash -c "echo 'BUILDDIR=/tmp/makepkg' >> /etc/makepkg.conf"
+fi
+
+info "Moving the Firefox cache to RAM..."
+cat <<'EOF' | apply /etc/firefox/policies/policies.json
+{
+  "policies": {
+    "Preferences": {
+      "browser.cache.disk.enable": false,
+      "browser.cache.memory.enable": true
+    }
+  }
+}
+EOF
 
 # ==============================================================================
-# 13. DNS RESOLVER (Strict DNS-over-TLS via Cloudflare and Google)
+# 12. NETWORK (systemd-resolved + opportunistic DNS-over-TLS on Cloudflare)
 # ==============================================================================
-echo "--> Configuring systemd-resolved with strict DNS-over-TLS..."
-mkdir -p /etc/systemd/resolved.conf.d
-cat <<EOF > /etc/systemd/resolved.conf.d/99-dns.conf
+info "Configuring systemd-resolved (Cloudflare, opportunistic DoT)..."
+cat <<'EOF' | apply /etc/systemd/resolved.conf.d/99-dns.conf
 [Resolve]
 DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com
-FallbackDNS=8.8.8.8#dns.google 8.8.4.4#dns.google
-DNSOverTLS=yes
+FallbackDNS=1.1.1.1 1.0.0.1
+DNSOverTLS=opportunistic
 Domains=~.
 EOF
 
-systemctl enable --now systemd-resolved || true
-ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
+if run systemctl enable --now systemd-resolved; then
+    run rm -f /etc/resolv.conf
+    run ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+else
+    fail "systemd-resolved did not start; leaving /etc/resolv.conf untouched"
+fi
 
-mkdir -p /etc/NetworkManager/conf.d
-printf '[main]\ndns=systemd-resolved\n' > /etc/NetworkManager/conf.d/99-systemd-resolved.conf
-systemctl restart NetworkManager || true
+cat <<'EOF' | apply /etc/NetworkManager/conf.d/99-systemd-resolved.conf
+[main]
+dns=systemd-resolved
+EOF
+run systemctl restart NetworkManager || true
+
+info "Configuring the SDDM Wayland greeter..."
+cat <<'EOF' | apply /etc/sddm.conf.d/10-wayland.conf
+[General]
+DisplayServer=wayland
+GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
+
+[Wayland]
+CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1
+EOF
+
+# ==============================================================================
+# 13. BTRFS FSTAB OPTIMIZATION (verified before it is written)
+# ==============================================================================
+optimize_btrfs_fstab() {
+    local FSTAB="/etc/fstab"
+    local CANDIDATE="/tmp/fstab.candidate"
+    local BACKUP="/etc/fstab.bak.$(date +%s)"
+
+    if [ "$DRY_RUN" = 1 ]; then
+        info "[dry-run] would add noatime,compress=zstd:1 to Btrfs mounts in $FSTAB"
+        return 0
+    fi
+
+    if ! grep -qE '^[^#].*[[:space:]]btrfs[[:space:]]' "$FSTAB"; then
+        info "No Btrfs filesystem in $FSTAB. Skipping fstab tuning."
+        return 0
+    fi
+
+    info "Optimizing Btrfs mount options in fstab..."
+    rm -f "$CANDIDATE"
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ ^[[:space:]]*# ]] || [ -z "${line// }" ]; then
+            echo "$line" >> "$CANDIDATE"
+            continue
+        fi
+
+        read -r fs_spec fs_file fs_vfstype fs_mntops fs_freq fs_passno _ <<< "$line"
+
+        if [ "$fs_vfstype" = "btrfs" ]; then
+            IFS=',' read -ra opts <<< "$fs_mntops"
+            local opt_list=()
+            local o
+            for o in "${opts[@]}"; do
+                [[ "$o" =~ ^(relatime|atime|strictatime)$ ]] && continue
+                [[ "$o" =~ ^compress ]] && continue
+                opt_list+=("$o")
+            done
+
+            # discard=async is the Btrfs default since kernel 6.2; fstrim.timer covers the rest.
+            opt_list=("noatime" "compress=zstd:1" "${opt_list[@]}")
+
+            local unique_opts=()
+            declare -A seen=()
+            for o in "${opt_list[@]}"; do
+                if [ -z "${seen[$o]:-}" ]; then
+                    seen["$o"]=1
+                    unique_opts+=("$o")
+                fi
+            done
+            unset seen
+
+            local new_mntops
+            new_mntops=$(IFS=,; echo "${unique_opts[*]}")
+
+            printf '%-42s %-16s %-8s %-45s 0 0\n' \
+                "$fs_spec" "$fs_file" "$fs_vfstype" "$new_mntops" >> "$CANDIDATE"
+        else
+            echo "$line" >> "$CANDIDATE"
+        fi
+    done < "$FSTAB"
+
+    if findmnt --verify --tab-file "$CANDIDATE" >/dev/null 2>&1; then
+        cp "$FSTAB" "$BACKUP"
+        mv "$CANDIDATE" "$FSTAB"
+        chmod 0644 "$FSTAB"
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        mount -o remount,noatime,compress=zstd:1 / 2>/dev/null || true
+        ok "fstab verified with findmnt and updated (backup: $BACKUP)."
+    else
+        warn "findmnt rejected the candidate fstab. Live fstab left untouched."
+        rm -f "$CANDIDATE"
+    fi
+}
+optimize_btrfs_fstab
+
+# ==============================================================================
+# 14. BOOT (AMD microcode, initramfs, bootloader)
+# ==============================================================================
+if [ "$DRY_RUN" = 1 ] || pacman -Q amd-ucode >/dev/null 2>&1; then
+    info "Ensuring the microcode hook is enabled and rebuilding the initramfs..."
+    if [ -f /etc/mkinitcpio.conf ] && ! grep -qE '^HOOKS=.*microcode' /etc/mkinitcpio.conf; then
+        run sed -i 's/^HOOKS=(\(.*\))/HOOKS=(microcode \1)/' /etc/mkinitcpio.conf
+    fi
+    run mkinitcpio -P || fail "mkinitcpio failed"
+else
+    warn "amd-ucode is not installed; skipping the initramfs rebuild."
+fi
+
+info "Setting the bootloader timeout..."
+if [ -f /etc/default/grub ] && command -v grub-mkconfig >/dev/null 2>&1; then
+    if grep -q '^GRUB_TIMEOUT=' /etc/default/grub; then
+        run sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub
+    else
+        run bash -c "echo 'GRUB_TIMEOUT=2' >> /etc/default/grub"
+    fi
+    run grub-mkconfig -o /boot/grub/grub.cfg || fail "grub-mkconfig failed"
+elif [ -f /boot/loader/loader.conf ]; then
+    info "systemd-boot detected."
+    if grep -q '^timeout' /boot/loader/loader.conf; then
+        run sed -i 's/^timeout.*/timeout 2/' /boot/loader/loader.conf
+    else
+        run bash -c "echo 'timeout 2' >> /boot/loader/loader.conf"
+    fi
+else
+    warn "Neither GRUB nor systemd-boot detected; skipping the bootloader step."
+fi
+
+# ==============================================================================
+# 15. FLATPAK & FIRMWARE
+# ==============================================================================
+info "Configuring Flatpak (Flathub)..."
+run flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo \
+    || fail "Could not add the Flathub remote"
+run flatpak update -y || true
+
+if command -v fwupdmgr >/dev/null 2>&1; then
+    info "Checking for firmware updates..."
+    run fwupdmgr refresh --force || true
+    run fwupdmgr update -y || true
+fi
+
+# ==============================================================================
+# 16. USABILITY POLISH
+# ==============================================================================
+info "Enabling sudo password feedback..."
+cat <<'EOF' | apply /etc/sudoers.d/pwfeedback
+Defaults pwfeedback
+EOF
+run chmod 0440 /etc/sudoers.d/pwfeedback
+
+# ==============================================================================
+# 17. ENABLE SERVICES
+# ==============================================================================
+info "Enabling services..."
+SERVICES=(
+    sddm.service
+    NetworkManager.service
+    systemd-resolved.service
+    systemd-timesyncd.service
+    power-profiles-daemon.service
+    earlyoom.service
+    ufw.service
+    bluetooth.service
+    cups.socket
+    fstrim.timer
+    paccache.timer
+    reflector.timer
+)
+for svc in "${SERVICES[@]}"; do
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '  [dry-run] enable %s\n' "$svc"
+    elif systemctl enable "$svc" >/dev/null 2>&1; then
+        ok "Enabled $svc"
+    else
+        warn "Could not enable $svc"
+    fi
+done
+
+run systemctl daemon-reload || true
+if ! run systemctl start systemd-zram-setup@zram0.service; then
+    warn "zram will activate on the next boot."
+fi
 
 # ==============================================================================
 # SUMMARY
@@ -473,18 +784,29 @@ echo "==========================================================================
 if [ "$FAILURES" -gt 0 ]; then
     echo "Setup finished with $FAILURES non-fatal warning(s) or failure(s)."
 else
-    echo "Setup complete! All steps finished successfully."
+    echo "Setup complete. All steps finished successfully."
 fi
 echo "=============================================================================="
 echo "Quick verification:"
-echo "  node -v                       # Verify active Node version"
-echo "  npm -v                        # Verify npm"
-echo "  brave-origin                  # Launch Brave Origin"
-echo "  vainfo                        # Verify AMD VCN video hardware acceleration"
-echo "  powerprofilesctl              # Verify GNOME power profiles daemon"
-echo "  echo \$SHELL                  # Should print /usr/bin/zsh after re-login"
-echo ""
-echo "Rebooting to apply all graphics, power, and session changes..."
-sync
-sudo reboot
-}
+echo "  node -v                  # Active Node.js version (fnm)"
+echo "  java --version           # Latest OpenJDK SDK"
+echo "  vainfo                   # AMD VCN VA-API acceleration"
+echo "  vulkaninfo --summary     # Radeon Vulkan"
+echo "  powerprofilesctl get     # Power profile"
+echo "  ufw status               # Firewall"
+echo "  resolvectl status        # DNS-over-TLS state"
+echo "  zramctl                  # Compressed swap"
+echo "  findmnt /                # Btrfs mount options"
+echo "  echo \$SHELL             # /usr/bin/zsh after re-login"
+if [ "$DRY_RUN" = 1 ]; then
+    echo ""
+    echo "Dry run finished. No changes were made."
+elif [ "$DO_REBOOT" = 1 ]; then
+    echo ""
+    echo "Rebooting to apply graphics, session, and kernel changes..."
+    sync
+    systemctl reboot
+else
+    echo ""
+    echo "Reboot skipped (--no-reboot). Reboot before using the desktop."
+fi
