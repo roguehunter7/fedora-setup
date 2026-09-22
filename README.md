@@ -74,7 +74,7 @@ and the run is logged to `/var/log/arch-setup-<timestamp>.log`.
 - **Packages** — a curated set instead of `plasma-meta`: plasma-desktop, KWin, SDDM, Dolphin, Kate, Gwenview, Spectacle, Ark, print-manager, PipeWire with 32-bit support, SOF and ALSA firmware, AMD VA-API and Vulkan drivers, the dev toolchain, Python, Go, Rust, the latest OpenJDK SDK, Node.js through fnm, Firefox, qBittorrent, LibreOffice, Flatpak.
 - **System** — 1:1 zstd zram, earlyoom, ufw with incoming denied, journald capped at 200M, fstrim and paccache timers, 2s GRUB timeout, AMD microcode through mkinitcpio, fwupd with its refresh timer, and `smartd` scanning every SMART-capable device.
 - **Storage** — Btrfs root remounted with `noatime,compress=zstd:1` after `findmnt --verify` accepts the new fstab, makepkg builds in `/tmp`, Firefox disk cache disabled.
-- **Desktop** — dark Breeze, empty session on login, doubled animation speed, Super+Space for KRunner, Baloo indexing off, SDDM on Wayland, LibreOffice with Colibre icons, tabbed UI and OOXML save defaults.
+- **Desktop** — dark Breeze, empty session on login, doubled animation speed, Super+Space for KRunner, Baloo indexing off, SDDM on Wayland, LibreOffice with Colibre icons, tabbed UI and OOXML save defaults. Extras: kinfocenter, plasma-disks, kio-zeroconf, ksshaskpass, KFind, Filelight, Okular, the default wallpapers and the Ocean sound theme. Optional KDE applications are installed as well: Partition Manager, System Log, KRfb screen sharing, Plasma Vault, Skanlite, Kio-gdrive, Haruna, Elisa, KClock and a few small utilities.
 - **Shell and fonts** — zsh as the login shell with Starship, autosuggestions, syntax highlighting, history substring search, completions and fzf; Fira Code Nerd Font from the repos, Microsoft core fonts, and sub-pixel RGB rendering with the LCD filter turned on.
 - **Network** — systemd-resolved on Cloudflare with opportunistic DNS-over-TLS, NetworkManager pointed at resolved, systemd-timesyncd, Avahi with `nss-mdns` for `.local` discovery, and `cloudflared` for tunnels.
 - **Power** — TLP with a 60% charge limit for this laptop's battery, radio kill-switch handling and `lm_sensors`. `power-profiles-daemon` is removed; `tlp-pd` provides the D-Bus power profiles KDE expects.
@@ -122,4 +122,5 @@ java --version          # latest OpenJDK SDK
   want it: `sbctl create-keys`, `sbctl enroll-keys -m`, then sign the kernel and the GRUB
   EFI binary and regenerate the bootloader configuration. See the Arch Wiki page on
   Secure Boot.
+- **KClock's background daemon does not autostart.** It is disabled per user in `~/.config/autostart`, so alarms only fire while KClock is open. Delete that file if you want alarms to work in the background.
 - **Hibernation is not configured**, because swap is zram only.

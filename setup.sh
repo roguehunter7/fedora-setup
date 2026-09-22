@@ -267,6 +267,14 @@ PACKAGES=(
     kio-extras kio-admin dolphin-plugins plasma-systemmonitor
     print-manager
 
+    # --- Plasma extras: system info, disks, search, documents, discovery ---
+    kinfocenter plasma-workspace-wallpapers ocean-sound-theme plasma-disks
+    kio-zeroconf ksshaskpass kfind filelight okular
+
+    # --- Optional KDE applications ---
+    partitionmanager ksystemlog krfb plasma-vault skanlite kio-gdrive
+    haruna elisa kclock kcolorchooser kruler kcharselect sweeper
+
     # --- Build toolchain & languages ---
     cmake ninja clang gdb cpupower
     python python-pip python-virtualenv
@@ -468,6 +476,14 @@ if [ "$TARGET_USER" != "root" ] && command -v kwriteconfig6 >/dev/null 2>&1; the
     # Super+Space opens KRunner (defaults preserved)
     try as_user kwriteconfig6 --file kglobalshortcutsrc --group krunner.desktop \
         --key _launch 'Alt+Space\tAlt+F2,Meta+Space\tAlt+Space\tAlt+F2,KRunner'
+
+    info "Stopping KClock's daemon from autostarting at login..."
+    if [ -f /etc/xdg/autostart/org.kde.kclockd-autostart.desktop ]; then
+        cat <<'EOF' | apply "$TARGET_HOME/.config/autostart/org.kde.kclockd-autostart.desktop"
+[Desktop Entry]
+Hidden=true
+EOF
+    fi
 
     info "Disabling the Baloo file indexer (plasma-desktop pulls it in)..."
     cat <<'EOF' | apply "$TARGET_HOME/.config/baloofilerc"
