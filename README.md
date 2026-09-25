@@ -4,6 +4,20 @@ Things to do after installing the Fedora KDE Plasma Desktop Edition. Written for
 
 Run top to bottom. Each block is copy-paste into a terminal. Reboot where told. Graphics, session, and kernel changes need it.
 
+## DNF tuning
+
+Speed up dnf before the first upgrade (10 parallel downloads, fastest mirror, assume yes):
+
+```bash
+sudo dnf config-manager setopt max_parallel_downloads=10 fastestmirror=True defaultyes=True
+```
+
+Check it (should print `10`, `True`, `True`):
+
+```bash
+dnf config-manager show max_parallel_downloads fastestmirror defaultyes
+```
+
 ## Update
 
 Update everything first, then reboot:
