@@ -123,24 +123,24 @@ This installs the extra apps. The spin already ships Plasma, KWin, Dolphin, Kons
 sudo dnf install -y gwenview spectacle ark kdegraphics-thumbnailers ffmpegthumbs kf6-kimageformats kio-extras dolphin-plugins plasma-systemmonitor plasma-print-manager kinfocenter plasma-disks ksshaskpass filelight okular kde-partitionmanager kclock python3-pip python3-virtualenv java-latest-openjdk-devel golang mesa-dri-drivers vulkan-tools libva libva-utils dav1d libheif libavif libjxl libwebp mpv pipewire-pulseaudio pipewire-alsa alsa-sof-firmware alsa-ucm alsa-utils bluez firefox qbittorrent libreoffice 7zip unzip xdg-user-dirs cups snapper python3-dnf-plugin-snapper btrfs-assistant btrfsmaintenance easyeffects lsp-plugins calf smartmontools nvme-cli earlyoom zram-generator flatpak fwupd nss-mdns openssh rsync dosfstools mtools usbutils unrar yt-dlp zsh
 ```
 
-## Battery charge limit (60%)
+## Battery charge limit (60%) [ASUS-only]
 
-This ASUS exposes charge control directly, so no TLP is needed. Stop charging at 60% to slow battery wear:
+[ASUS VivoBook X409DA only — skip on other machines.] This ASUS exposes charge control directly, so no TLP is needed. Stop charging at 60% to slow battery wear. Skip if the path below does not exist:
 
 ```bash
-echo 60 | sudo tee /sys/class/power_supply/BAT0/charge_control_end_threshold
+[ -e /sys/class/power_supply/BAT0/charge_control_end_threshold ] && echo 60 | sudo tee /sys/class/power_supply/BAT0/charge_control_end_threshold || echo "no BAT0 charge control — skipping"
 ```
 
-Make it survive reboots:
+Make it survive reboots (ASUS-only — skip if the path above does not exist):
 
 ```bash
-printf 'w /sys/class/power_supply/BAT0/charge_control_end_threshold - - - - 60\n' | sudo tee /etc/tmpfiles.d/battery-charge-limit.conf >/dev/null
+[ -e /sys/class/power_supply/BAT0/charge_control_end_threshold ] && printf 'w /sys/class/power_supply/BAT0/charge_control_end_threshold - - - - 60\n' | sudo tee /etc/tmpfiles.d/battery-charge-limit.conf >/dev/null || echo "no BAT0 charge control — skipping"
 ```
 
 Check it (should print `60`):
 
 ```bash
-cat /sys/class/power_supply/BAT0/charge_control_end_threshold
+[ -e /sys/class/power_supply/BAT0/charge_control_end_threshold ] && cat /sys/class/power_supply/BAT0/charge_control_end_threshold || echo "no BAT0 charge control — skipping"
 ```
 
 ## Shell (zsh + Starship)
@@ -155,14 +155,11 @@ chsh -s $(command -v zsh)
 curl -sS https://starship.rs/install.sh | sh -s -- -y
 ```
 
-Append this block to `~/.zshrc`. It is guarded, so re-running is safe:
+Append this base block to `~/.zshrc`. It is guarded, so re-running is safe. It needs nothing beyond zsh + Starship:
 
 ```zsh
-# BEGIN SETUP BLOCKS
-export PATH="$HOME/.local/bin:$HOME/.local/share/fnm:$PATH"
-if command -v fnm >/dev/null 2>&1; then
-    eval "$(fnm env --use-on-cd --resolve-engines --shell zsh)"
-fi
+# BEGIN SETUP BLOCK
+export PATH="$HOME/.local/bin:$PATH"
 autoload -U compinit
 compinit
 setopt COMPLETE_IN_WORD
@@ -174,9 +171,6 @@ setopt SHARE_HISTORY
 setopt autocd
 unsetopt nomatch
 eval "$(starship init zsh)"
-[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-[ -f /usr/share/fzf/shell/key-bindings.zsh ] && source /usr/share/fzf/shell/key-bindings.zsh
-[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 bindkey "^[[1;5D" backward-word
 bindkey "^[[1;5C" forward-word
 bindkey '^H' backward-kill-word
@@ -184,7 +178,25 @@ bindkey '^[[3;5~' kill-word
 bindkey "^[[3~" delete-char
 bindkey '^[[H' beginning-of-line
 bindkey '^[[F' end-of-line
-# END SETUP BLOCKS
+# END SETUP BLOCK
+```
+
+[Optional — only if you did the Node.js (fnm) section and want the plugins.] First install the plugins, then append this second block:
+
+```bash
+sudo dnf install -y zsh-autosuggestions fzf zsh-syntax-highlighting
+```
+
+```zsh
+# BEGIN OPTIONAL BLOCK (fnm + plugins)
+export PATH="$HOME/.local/share/fnm:$PATH"
+if command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env --use-on-cd --resolve-engines --shell zsh)"
+fi
+[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/fzf/shell/key-bindings.zsh ] && source /usr/share/fzf/shell/key-bindings.zsh
+[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# END OPTIONAL BLOCK
 ```
 
 ## Node.js (fnm) [Optional]
@@ -223,13 +235,13 @@ kwriteconfig6 --file kdeglobals --group KDE --key AnimationDurationFactor 0.5
 kwriteconfig6 --file kglobalshortcutsrc --group krunner.desktop --key _launch 'Alt+Space	Alt+F2,Meta+Space	Alt+Space	Alt+F2,KRunner'
 ```
 
-Disable the Baloo file indexer:
+Disable the Baloo file indexer [Optional — breaks file search in Dolphin/KRunner]:
 
 ```bash
 mkdir -p ~/.config && printf '[Basic Settings]\nIndexing-Enabled=false\n' | tee ~/.config/baloofilerc >/dev/null && sudo mkdir -p /etc/xdg && printf '[Basic Settings]\nIndexing-Enabled=false\n' | sudo tee /etc/xdg/baloofilerc >/dev/null
 ```
 
-Stop KClock's daemon from autostarting (alarms then only fire while KClock is open):
+Stop KClock's daemon from autostarting [Optional — alarms then only fire while KClock is open]:
 
 ```bash
 [ -f /etc/xdg/autostart/org.kde.kclockd-autostart.desktop ] && mkdir -p ~/.config/autostart && printf '[Desktop Entry]\nHidden=true\n' > ~/.config/autostart/org.kde.kclockd-autostart.desktop
@@ -239,7 +251,7 @@ Fedora uses `plasmalogin`, not SDDM, so there is no greeter config to write.
 
 ## Fonts
 
-Sub-pixel RGB rendering with the LCD filter, then rebuild the cache:
+[Optional — skip on HiDPI/Wayland, Fedora defaults are fine.] Sub-pixel RGB rendering with the LCD filter, then rebuild the cache:
 
 ```bash
 sudo ln -sf /usr/share/fontconfig/conf.avail/10-sub-pixel-rgb.conf /etc/fonts/conf.d/10-sub-pixel-rgb.conf
@@ -279,10 +291,10 @@ Cap the journal at 200M:
 sudo mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\nSystemMaxUse=200M\nSystemMaxFiles=5\nSyncIntervalSec=5m\n' | sudo tee /etc/systemd/journald.conf.d/99-ssd.conf >/dev/null && sudo systemctl restart systemd-journald
 ```
 
-1:1 zstd zram (Fedora defaults to smaller lzo-rle zram; this replaces it):
+zstd compression for zram (Fedora defaults to lzo-rle; keep the default size, only switch the algorithm):
 
 ```bash
-printf '[zram0]\nzram-size = ram\ncompression-algorithm = zstd\nswap-priority = 100\nfs-type = swap\n' | sudo tee /etc/systemd/zram-generator.conf >/dev/null && sudo systemctl daemon-reload && sudo systemctl start systemd-zram-setup@zram0.service
+printf '[zram0]\ncompression-algorithm = zstd\n' | sudo tee /etc/systemd/zram-generator.conf >/dev/null && sudo systemctl daemon-reload && sudo systemctl start systemd-zram-setup@zram0.service
 ```
 
 Kernel and memory sysctls (aggressive swap into zram, Proton map count, inotify capacity):
@@ -317,30 +329,6 @@ Fedora ships `firewalld`. Use it and don't install `ufw` alongside it:
 sudo systemctl enable --now firewalld
 ```
 
-## DNS (Cloudflare DoT)
-
-systemd-resolved on Cloudflare with opportunistic DNS-over-TLS:
-
-```bash
-sudo mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com\nFallbackDNS=1.1.1.1 1.0.0.1\nDNSOverTLS=opportunistic\nDomains=~.\n' | sudo tee /etc/systemd/resolved.conf.d/99-dns.conf >/dev/null && sudo systemctl enable --now systemd-resolved && sudo rm -f /etc/resolv.conf && sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-```
-
-Point NetworkManager at resolved, then restart it:
-
-```bash
-sudo mkdir -p /etc/NetworkManager/conf.d && printf '[main]\ndns=systemd-resolved\n' | sudo tee /etc/NetworkManager/conf.d/99-systemd-resolved.conf >/dev/null && sudo systemctl restart NetworkManager
-```
-
-`nss-mdns` (in the install above) pulls in Avahi, so no action is needed.
-
-## SSD longevity
-
-Keep the Firefox disk cache in RAM:
-
-```bash
-sudo mkdir -p /etc/firefox/policies && printf '{"policies": {"Preferences": {"browser.cache.disk.enable": false, "browser.cache.memory.enable": true}}}\n' | sudo tee /etc/firefox/policies/policies.json >/dev/null
-```
-
 ## Btrfs
 
 The installer already sets `compress=zstd:1` on `/` and `/home`. Add `noatime` to Btrfs lines missing it (safe to re-run), then verify:
@@ -371,12 +359,6 @@ sudo snapper -c root create-config /
 sudo snapper -c home create-config /home
 ```
 
-Tighten the timelines (defaults keep 10 hourly / 10 daily):
-
-```bash
-for c in root home; do [ -f /etc/snapper/configs/$c ] && sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="5"/; s/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="7"/' /etc/snapper/configs/$c; done
-```
-
 Monthly scrubs are covered by `btrfs-scrub.timer` (enabled below).
 
 `grub-btrfs` is not in the Fedora repos, so there is no GRUB snapshot menu. Restore from a live USB if needed.
@@ -404,7 +386,7 @@ echo 'Defaults pwfeedback' | sudo tee /etc/sudoers.d/pwfeedback >/dev/null && su
 Enable everything in one go (the rest — display manager, NetworkManager, firewalld, Bluetooth, printing, trim, smartd, Avahi — ships enabled):
 
 ```bash
-sudo systemctl enable systemd-resolved.service earlyoom.service snapper-timeline.timer snapper-cleanup.timer btrfs-scrub.timer fwupd-refresh.timer
+sudo systemctl enable earlyoom.service snapper-timeline.timer snapper-cleanup.timer btrfs-scrub.timer fwupd-refresh.timer
 ```
 
 ```bash
@@ -437,22 +419,16 @@ Btrfs mount options:
 findmnt /
 ```
 
-DNS-over-TLS state:
-
-```bash
-resolvectl status
-```
-
 Firewall running:
 
 ```bash
 firewall-cmd --state
 ```
 
-`60` = limit active:
+[ASUS-only] `60` = limit active:
 
 ```bash
-cat /sys/class/power_supply/BAT0/charge_control_end_threshold
+[ -e /sys/class/power_supply/BAT0/charge_control_end_threshold ] && cat /sys/class/power_supply/BAT0/charge_control_end_threshold || echo "no BAT0 charge control — skipping"
 ```
 
 Pre/post snapshots:
@@ -498,5 +474,3 @@ sudo dnf downgrade <pkg>-<ver>
 ```
 
 **Hibernation is not configured** — swap is zram only.
-
-**KClock alarms** only fire while KClock is open (its background daemon autostart is disabled per the desktop defaults above).
