@@ -1,126 +1,209 @@
-# Arch Linux Laptop Setup
+# Fedora KDE Post Install Guide
 
-Two phases for an AMD Ryzen/Picasso laptop (amdgpu, Vega 8, VCN): install Arch with
-`archinstall`, then run the setup script in this repo for a lean KDE Plasma 6 desktop
-and the system tuning.
+Things to do after installing the Fedora KDE Plasma Desktop Edition. Written for an ASUS VivoBook X409DA (AMD Ryzen 5 3500U / Vega 8, NVMe, Btrfs); most steps suit any Fedora KDE machine.
 
-## Phase 1: install Arch with archinstall
+Run top to bottom. Each block is copy-paste into a terminal. Reboot where told. Graphics, session, and kernel changes need it.
 
-Boot the Arch ISO in UEFI mode with Secure Boot off and run the guided installer:
+## Update
 
-```bash
-archinstall
+* Update everything first, then reboot:
+* `sudo dnf upgrade --refresh -y`
+* `sudo systemctl reboot`
+
+## RPM Fusion
+
+* Fedora leaves out non-free software (codecs, drivers, firmware) by default. Enable RPM Fusion:
+* `sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm`
+* `sudo dnf upgrade --refresh -y`
+
+## Firmware
+
+* If your system supports firmware delivery through LVFS:
+* `fwupdmgr refresh --force`
+* `fwupdmgr get-devices # lists devices with available updates`
+* `fwupdmgr get-updates # fetches the list of available updates`
+* `fwupdmgr update`
+
+## Flatpak
+
+* Enable access to all Flathub flatpaks (skip if you ticked "Enable Third Party Repositories" on first boot):
+* `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`
+
+## Extra apps
+
+* Compilers and build tools as a group:
+* `sudo dnf group install -y development-tools`
+* This installs the extra apps. The spin already ships Plasma, KWin, Dolphin, Konsole, and PipeWire, so those are not listed. (`kio-zeroconf` has no Fedora build, so it is omitted. `nss-mdns` in the list below covers `.local` discovery (it pulls in Avahi itself). Niche extras from the old script (KRfb, Skanlite, Haruna, Rust toolchain, JACK, `kfind`, KColorChooser and friends) are left out. Install them from Discover when you need them.)
+```
+sudo dnf install -y gwenview spectacle ark kdegraphics-thumbnailers ffmpegthumbs kf6-kimageformats kio-extras dolphin-plugins plasma-systemmonitor plasma-print-manager kinfocenter plasma-disks ksshaskpass filelight okular kde-partitionmanager kclock python3-pip python3-virtualenv java-latest-openjdk-devel golang mesa-dri-drivers mesa-vulkan-drivers vulkan-tools libva libva-utils ffmpeg gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly gstreamer1-plugin-libav dav1d libheif libavif libjxl libwebp mpv pipewire-pulseaudio pipewire-alsa alsa-sof-firmware alsa-ucm alsa-utils bluez firefox qbittorrent libreoffice 7zip unzip xdg-user-dirs cups snapper python3-dnf-plugin-snapper btrfs-assistant btrfsmaintenance easyeffects lsp-plugins calf smartmontools nvme-cli earlyoom zram-generator flatpak fwupd nss-mdns irqbalance openssh rsync dosfstools mtools usbutils unrar yt-dlp zsh zsh-autosuggestions zsh-syntax-highlighting fzf bash-completion man-db man-pages fastfetch google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-emoji-fonts dejavu-sans-fonts fira-code-fonts```
+
+## Battery charge limit (60%)
+
+* This ASUS exposes charge control directly, so no TLP is needed. Stop charging at 60% to slow battery wear:
+* `echo 60 | sudo tee /sys/class/power_supply/BAT0/charge_control_end_threshold`
+* Make it survive reboots:
+* `printf 'w /sys/class/power_supply/BAT0/charge_control_end_threshold - - - - 60\n' | sudo tee /etc/tmpfiles.d/battery-charge-limit.conf >/dev/null`
+* Check it: `cat /sys/class/power_supply/BAT0/charge_control_end_threshold` (should print `60`)
+
+## Shell (zsh + Starship)
+
+* Make zsh the login shell, install the Starship prompt upstream (no Fedora package), and add the shell setup block:
+* `chsh -s $(command -v zsh)`
+* `curl -sS https://starship.rs/install.sh | sh -s -- -y`
+* Append this block to `~/.zshrc`. It is guarded, so re-running is safe:
+```
+# BEGIN SETUP BLOCKS
+export PATH="$HOME/.local/bin:$HOME/.local/share/fnm:$PATH"
+if command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env --use-on-cd --resolve-engines --shell zsh)"
+fi
+autoload -U compinit
+compinit
+setopt COMPLETE_IN_WORD
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt appendhistory
+setopt SHARE_HISTORY
+setopt autocd
+unsetopt nomatch
+eval "$(starship init zsh)"
+[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[ -f /usr/share/fzf/shell/key-bindings.zsh ] && source /usr/share/fzf/shell/key-bindings.zsh
+[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+bindkey "^[[1;5D" backward-word
+bindkey "^[[1;5C" forward-word
+bindkey '^H' backward-kill-word
+bindkey '^[[3;5~' kill-word
+bindkey "^[[3~" delete-char
+bindkey '^[[H' beginning-of-line
+bindkey '^[[F' end-of-line
+# END SETUP BLOCKS
 ```
 
-Use the default flow and answer the prompts. Reboot when the installer finishes.
+## Node.js (fnm) [Optional]
 
-Phase 2 adapts to whatever the installer produced: it detects GRUB or systemd-boot,
-replaces the installer's zram configuration with a 1:1 size, and installs its own minimal
-Plasma 6 set regardless of the desktop profile you chose.
+* Fedora ships no `fnm` package, so install it upstream, then take the latest Node:
+* `curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell`
+* `export PATH="$HOME/.local/share/fnm:$PATH" && eval "$(fnm env --shell bash)" && fnm install --latest && fnm default $(fnm ls | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)`
 
-### Choices worth making in the installer
+## KDE polish
 
-None of these are required for the script to run, but each changes the result.
+* Dark Breeze, empty session on login, double animation speed, Super+Space for KRunner:
+* `kwriteconfig6 --file kdeglobals --group General --key ColorScheme BreezeDark`
+* `kwriteconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage org.kde.breezedark.desktop`
+* `kwriteconfig6 --file ksmserverrc --group General --key loginMode emptySession`
+* `kwriteconfig6 --file kdeglobals --group KDE --key AnimationDurationFactor 0.5`
+* `kwriteconfig6 --file kglobalshortcutsrc --group krunner.desktop --key _launch 'Alt+Space\tAlt+F2,Meta+Space\tAlt+Space\tAlt+F2,KRunner'`
+* Disable the Baloo file indexer:
+* `mkdir -p ~/.config && printf '[Basic Settings]\nIndexing-Enabled=false\n' | tee ~/.config/baloofilerc >/dev/null && sudo mkdir -p /etc/xdg && printf '[Basic Settings]\nIndexing-Enabled=false\n' | sudo tee /etc/xdg/baloofilerc >/dev/null`
+* Stop KClock's daemon from autostarting (alarms then only fire while KClock is open):
+* `[ -f /etc/xdg/autostart/org.kde.kclockd-autostart.desktop ] && mkdir -p ~/.config/autostart && printf '[Desktop Entry]\nHidden=true\n' > ~/.config/autostart/org.kde.kclockd-autostart.desktop`
+* Fedora uses `plasmalogin`, not SDDM, so there is no greeter config to write.
 
-- **Disk** — `nvme0n1` only. `sda` is a separate 465 GB data disk, and nothing in this repo touches it.
-- **Filesystem** — Btrfs, compression on, mount option `noatime,compress=zstd:1`. Compression enabled at install time also compresses the base system; enabling it later only affects new files.
-- **Snapshots** — in the Btrfs options pick **snapper**, not Timeshift. archinstall then creates `root` (`/`) and `home` (`/home`) snapper configs, enables the timeline and cleanup timers, and with GRUB it installs `grub-btrfs` and `inotify-tools` and enables `grub-btrfsd`. This script adds `snap-pac`, which archinstall does not install, and tightens both timelines.
-- **Bootloader** — GRUB. The snapshot menu depends on it.
-- **Swap** — off. The script owns zram. If you leave it on, your `zram-generator.conf` is backed up and replaced with a 1:1 configuration.
-- **Profile** — Minimal. The KDE profile installs `plasma-meta`, which this repo avoids on purpose.
-- **Kernels** — `linux` and `linux-lts`. The second kernel is cheap insurance on a rolling release.
-- **Audio** — pipewire. **Network** — NetworkManager. **NTP** — on.
-- **User** — your account in `wheel`, with sudo.
-- **Additional packages** — `git curl`. archinstall installs only `base`, `sudo`, `linux-firmware`, `mkinitcpio`, the kernel and `amd-ucode`, so without `curl` the one-liner in phase 2 fails.
-- **ESP** — 1 GiB if it asks for a size. 512 MiB is enough for GRUB with standard kernels.
-- **Timezone, keymap, locale** — set them here; the script does not touch them.
+## Fonts
 
-## Phase 2: run the setup script
+* Sub-pixel RGB rendering with the LCD filter, then rebuild the cache:
+* `sudo ln -sf /usr/share/fontconfig/conf.avail/10-sub-pixel-rgb.conf /etc/fonts/conf.d/10-sub-pixel-rgb.conf`
+* `sudo ln -sf /usr/share/fontconfig/conf.avail/11-lcdfilter-default.conf /etc/fonts/conf.d/11-lcdfilter-default.conf`
+* `sudo fc-cache -f`
+* MS core fonts (`msttcore-fonts`) are not in the Fedora repos, so they are skipped.
 
-If you did not add `git` and `curl` in the installer, add them first:
+## System tuning
 
-```bash
-sudo pacman -S --needed git curl
+* Cap the journal at 200M:
 ```
-
-Then clone and run it:
-
-```bash
-git clone https://github.com/roguehunter7/linux-laptop-setup && cd linux-laptop-setup
-sudo ./setup.sh
+sudo mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\nSystemMaxUse=200M\nSystemMaxFiles=5\nSyncIntervalSec=5m\n' | sudo tee /etc/systemd/journald.conf.d/99-ssd.conf >/dev/null && sudo systemctl restart systemd-journald
 ```
-
-Or without cloning:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/roguehunter7/linux-laptop-setup/main/setup.sh | sudo bash
+* 1:1 zstd zram (Fedora defaults to smaller lzo-rle zram; this replaces it):
 ```
+printf '[zram0]\nzram-size = ram\ncompression-algorithm = zstd\nswap-priority = 100\nfs-type = swap\n' | sudo tee /etc/systemd/zram-generator.conf >/dev/null && sudo systemctl daemon-reload && sudo systemctl start systemd-zram-setup@zram0.service
+```
+* Kernel and memory sysctls (aggressive swap into zram, Proton map count, inotify capacity):
+```
+sudo mkdir -p /etc/sysctl.d && printf 'vm.swappiness = 180\nvm.page-cluster = 0\nvm.watermark_boost_factor = 0\nvm.watermark_scale_factor = 125\nvm.max_map_count = 1048576\nvm.vfs_cache_pressure = 50\nfs.inotify.max_user_watches = 524288\nfs.inotify.max_user_instances = 8192\n' | sudo tee /etc/sysctl.d/99-performance.conf >/dev/null && sudo sysctl --system
+```
+* earlyoom instead of systemd-oomd:
+* `printf 'EARLYOOM_ARGS="-m 5 -s 10 -r 60 --avoid '"'"'(^|/)(init|systemd|sddm|kwin_wayland|kwin|Xwayland|pipewire|wireplumber)$'"'"' --prefer '"'"'(^|/)(Web Content|firefox|chrome|electron)$'"'"'"\n' | sudo tee /etc/default/earlyoom >/dev/null && sudo systemctl disable --now systemd-oomd.service; sudo systemctl enable earlyoom.service`
+* SMART monitoring on every capable device:
+* `printf '# Scan every SMART-capable device\nDEVICESCAN -a\n' | sudo tee /etc/smartd.conf >/dev/null`
+* Skip the boot-delaying waiter:
+* `sudo systemctl disable NetworkManager-wait-online.service`
 
-Options:
+## Firewall
 
-- `--dry-run` prints every action without installing or writing anything.
-- `--no-reboot` skips the reboot at the end.
-- `-h`, `--help` shows usage.
+* Fedora ships `firewalld`. Use it and don't install `ufw` alongside it:
+* `sudo systemctl enable --now firewalld`
+* `sudo firewall-cmd --set-default-zone=public`
 
-The script reboots when it finishes so the graphics, session and kernel changes take
-effect. Hibernation is not supported: swap is zram only.
+## DNS (Cloudflare DoT)
 
-Every file it may overwrite is copied to `/var/backups/arch-setup-<timestamp>/` first,
-and the run is logged to `/var/log/arch-setup-<timestamp>.log`.
+* systemd-resolved on Cloudflare with opportunistic DNS-over-TLS:
+```
+sudo mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com\nFallbackDNS=1.1.1.1 1.0.0.1\nDNSOverTLS=opportunistic\nDomains=~.\n' | sudo tee /etc/systemd/resolved.conf.d/99-dns.conf >/dev/null && sudo systemctl enable --now systemd-resolved && sudo rm -f /etc/resolv.conf && sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+```
+* Point NetworkManager at resolved, then restart it:
+* `sudo mkdir -p /etc/NetworkManager/conf.d && printf '[main]\ndns=systemd-resolved\n' | sudo tee /etc/NetworkManager/conf.d/99-systemd-resolved.conf >/dev/null && sudo systemctl restart NetworkManager`
+* `nss-mdns` (in the install above) pulls in Avahi, so no action is needed.
 
-### What it does
+## SSD longevity
 
-- **Repos and mirrors** — pacman color and parallel downloads, `[multilib]`, reflector mirror ranking, full system upgrade.
-- **Packages** — a curated set instead of `plasma-meta`: plasma-desktop, KWin, SDDM, Dolphin, Kate, Gwenview, Spectacle, Ark, print-manager, PipeWire with 32-bit support, SOF and ALSA firmware, AMD VA-API and Vulkan drivers, the dev toolchain, Python, Go, Rust, the latest OpenJDK SDK, Node.js through fnm, Firefox, qBittorrent, LibreOffice, Flatpak.
-- **System** — 1:1 zstd zram, earlyoom, ufw with incoming denied, journald capped at 200M, fstrim and paccache timers, 2s GRUB timeout, AMD microcode through mkinitcpio, fwupd with its refresh timer, and `smartd` scanning every SMART-capable device.
-- **Storage** — Btrfs root remounted with `noatime,compress=zstd:1` after `findmnt --verify` accepts the new fstab, makepkg builds in `/tmp`, Firefox disk cache disabled.
-- **Desktop** — dark Breeze, empty session on login, doubled animation speed, Super+Space for KRunner, Baloo indexing off, SDDM on Wayland, LibreOffice with Colibre icons, tabbed UI and OOXML save defaults. Extras: kinfocenter, plasma-disks, kio-zeroconf, ksshaskpass, KFind, Filelight, Okular, the default wallpapers and the Ocean sound theme. Optional KDE applications are installed as well: Partition Manager, System Log, KRfb screen sharing, Plasma Vault, Skanlite, Kio-gdrive, Haruna, Elisa, KClock and a few small utilities.
-- **Shell and fonts** — zsh as the login shell with Starship, autosuggestions, syntax highlighting, history substring search, completions and fzf; Fira Code Nerd Font from the repos, Microsoft core fonts, and sub-pixel RGB rendering with the LCD filter turned on.
-- **Network** — systemd-resolved on Cloudflare with opportunistic DNS-over-TLS, NetworkManager pointed at resolved, systemd-timesyncd, Avahi with `nss-mdns` for `.local` discovery, and `cloudflared` for tunnels.
-- **Power** — TLP with a 60% charge limit for this laptop's battery, radio kill-switch handling and `lm_sensors`. `power-profiles-daemon` is removed; `tlp-pd` provides the D-Bus power profiles KDE expects.
-- **Snapshots** — `snapper` and `snap-pac` take a pre/post snapshot of `/` on every pacman transaction, `grub-btrfs` lists them in the GRUB menu, `btrfs-assistant` is the GUI, and `btrfs-scrub.timer` runs monthly scrubs.
-- **Security** — AppArmor enabled as a default LSM via the kernel command line, `arch-audit.timer`, `smartd`, and ufw.
-- **Maintenance** — `informant` holds pacman until you have read the Arch news, `downgrade` (AUR) rolls a package back, `arch-audit` reports advisories, `smartmontools` and `nvme-cli` cover the SSD.
-- **Audio** — `easyeffects` with the LSP and Calf plugin sets for the laptop speakers.
-- **Utilities** — `openssh`, `rsync`, `dosfstools`, `mtools`, `usbutils`, `unrar`, `yt-dlp`, `pipewire-jack`, and `irqbalance`. Mirror ranking is pinned by `/etc/xdg/reflector/reflector.conf` so the timer does not pick random worldwide mirrors.
+* Keep the Firefox disk cache in RAM:
+* `sudo mkdir -p /etc/firefox/policies && printf '{"policies": {"Preferences": {"browser.cache.disk.enable": false, "browser.cache.memory.enable": true}}}\n' | sudo tee /etc/firefox/policies/policies.json >/dev/null`
 
-### Requirements
+## Btrfs
 
-An installed Arch system with UEFI boot, an existing sudo user, and network access.
-GRUB and systemd-boot are both handled. TLP replaces `power-profiles-daemon`, which the
-script removes. The Btrfs mount and snapshot setup is skipped on other filesystems.
-Written for AMD graphics; it does nothing useful on NVIDIA or Intel machines. It does not
-partition disks, install a bootloader, or create users.
+* The installer already sets `compress=zstd:1` on `/` and `/home`. Add `noatime` to each Btrfs line in `/etc/fstab` (skips lines that already have it), then verify:
+* `grep -q 'noatime' /etc/fstab || sudo sed -i -E 's/^([^#][^ ]+ +\/[^ ]* +btrfs +)([^ ]+)/\1noatime,\2/' /etc/fstab`
+* `sudo findmnt --verify` (must pass before rebooting)
+* `fstrim.timer` (enabled below) stays for `/boot`, which is ext4. The Btrfs mounts discard async on their own.
 
-### Verify after reboot
+## Snapshots
 
-```bash
+* Snapper takes pre/post snapshots of `/` on every dnf transaction (via `python3-dnf-plugin-snapper`, installed above). Create the configs if the installer didn't:
+* `sudo snapper -c root create-config /` (skip if the installer already made it, since it errors when the config exists)
+* `sudo snapper -c home create-config /home` (same)
+* Tighten the timelines (defaults keep 10 hourly / 10 daily):
+* `for c in root home; do [ -f /etc/snapper/configs/$c ] && sudo sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="5"/; s/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="7"/' /etc/snapper/configs/$c; done`
+* Monthly scrubs are covered by `btrfs-scrub.timer` (enabled below).
+* `grub-btrfs` is not in the Fedora repos, so there is no GRUB snapshot menu. Restore from a live USB if needed.
+
+## Boot
+
+* Microcode ships via `linux-firmware`. No action is needed.
+* 2s GRUB timeout:
+* `sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub && sudo grub2-mkconfig -o /boot/grub2/grub.cfg`
+
+## Sudo feedback
+
+* Show `*` while typing the sudo password:
+* `echo 'Defaults pwfeedback' | sudo tee /etc/sudoers.d/pwfeedback >/dev/null && sudo chmod 0440 /etc/sudoers.d/pwfeedback`
+
+## Services
+
+* Enable everything in one go:
+* `sudo systemctl enable plasmalogin.service NetworkManager.service systemd-resolved.service earlyoom.service firewalld.service bluetooth.service cups.socket fstrim.timer dnf-makecache.timer smartd.service snapper-timeline.timer snapper-cleanup.timer btrfs-scrub.timer avahi-daemon.service irqbalance.service fwupd-refresh.timer`
+* `sudo systemctl reboot`
+
+## Verify after reboot
+
+```
 vainfo                  # VA-API on Vega 8
 vulkaninfo --summary    # RADV Vulkan
 zramctl                 # compressed swap
 findmnt /               # Btrfs mount options
 resolvectl status       # DNS-over-TLS state
-ufw status              # firewall active
-tlp-stat -b             # battery state and the 60% charge limit
+firewall-cmd --state    # firewall running
+cat /sys/class/power_supply/BAT0/charge_control_end_threshold  # 60 = limit active
 snapper list            # pre/post snapshots
-aa-status               # AppArmor profiles
-arch-audit              # security advisories
+getenforce              # SELinux enforcing
 node -v                 # Node.js through fnm
 java --version          # latest OpenJDK SDK
+echo $SHELL             # /usr/bin/zsh after re-login
 ```
 
-### Notes
+## Notes
 
-- **Informant blocks pacman on purpose.** Once installed, `pacman -Syu` stops if there is
-  unread Arch news. Run `informant list` to see the items, then `informant read` to mark
-  them read. A re-run of this script will hit that block until you do.
-- **Rollback.** `snapper list` shows the snapshots. After a bad upgrade, pick a pre-upgrade
-  entry under the GRUB snapshots submenu to boot it. `snap-pac` creates the pair around
-  every pacman transaction.
-- **Secure Boot is not automated.** `sbctl` can set it up, but the firmware must be put
-  into Setup Mode by hand and a half-finished job leaves the machine unbootable. If you
-  want it: `sbctl create-keys`, `sbctl enroll-keys -m`, then sign the kernel and the GRUB
-  EFI binary and regenerate the bootloader configuration. See the Arch Wiki page on
-  Secure Boot.
-- **KClock's background daemon does not autostart.** It is disabled per user in `~/.config/autostart`, so alarms only fire while KClock is open. Delete that file if you want alarms to work in the background.
-- **Hibernation is not configured**, because swap is zram only.
+* **Rollback** is native: `sudo dnf history rollback` or `sudo dnf downgrade <pkg>-<ver>`.
+* **Hibernation is not configured** — swap is zram only.
+* **KClock alarms** only fire while KClock is open (its background daemon autostart is disabled per the desktop defaults above).
