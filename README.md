@@ -122,7 +122,9 @@ bindkey '^[[F' end-of-line
 * `sudo ln -sf /usr/share/fontconfig/conf.avail/10-sub-pixel-rgb.conf /etc/fonts/conf.d/10-sub-pixel-rgb.conf`
 * `sudo ln -sf /usr/share/fontconfig/conf.avail/11-lcdfilter-default.conf /etc/fonts/conf.d/11-lcdfilter-default.conf`
 * `sudo fc-cache -f`
-* MS core fonts (`msttcore-fonts`) are not in the Fedora repos, so they are skipped.
+* Metric-compatible fonts (same layout as Arial, Times, Courier, Calibri, Cambria — no EULA):
+* `sudo dnf install -y liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts google-carlito-fonts google-crosextra-caladea-fonts`
+* Real Microsoft fonts [Optional]: `sudo dnf install -y lpf-mscore-fonts`, then `lpf update mscore-fonts` and follow the prompts (approves the EULA, downloads from SourceForge, builds and installs a local RPM).
 
 ## System tuning
 
