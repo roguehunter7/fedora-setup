@@ -15,6 +15,20 @@ Run top to bottom. Each block is copy-paste into a terminal. Reboot where told. 
 * Fedora leaves out non-free software (codecs, drivers, firmware) by default. Enable RPM Fusion:
 * `sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm`
 * `sudo dnf upgrade --refresh -y`
+* Show RPMFusion apps in Discover:
+* `sudo dnf update @core`
+* `sudo dnf install rpmfusion-*-appstream-data`
+* Enable the Cisco OpenH264 repo (Firefox uses it for WebRTC calls):
+* `sudo dnf config-manager setopt fedora-cisco-openh264.enabled=1`
+
+## Multimedia
+
+* Full ffmpeg instead of the stripped `ffmpeg-free`, plus the codec complements for GStreamer apps (straight from the [RPMFusion docs](https://rpmfusion.org/Howto/Multimedia)):
+* `sudo dnf swap ffmpeg-free ffmpeg --allowerasing`
+* `sudo dnf install @multimedia --setopt="install_weak_deps=False" --exclude=PackageKit-gstreamer-plugin`
+* AMD hardware decode (H.264/H.265/VC-1 on this Vega 8 — stock Mesa leaves these out):
+* `sudo dnf install mesa-va-drivers-freeworld`
+* `sudo dnf swap mesa-vulkan-drivers mesa-vulkan-drivers-freeworld`
 
 ## Firmware
 
@@ -35,7 +49,8 @@ Run top to bottom. Each block is copy-paste into a terminal. Reboot where told. 
 * `sudo dnf group install -y development-tools`
 * This installs the extra apps. The spin already ships Plasma, KWin, Dolphin, Konsole, and PipeWire, so those are not listed. (`kio-zeroconf` has no Fedora build, so it is omitted. `nss-mdns` in the list below covers `.local` discovery (it pulls in Avahi itself). Niche extras from the old script (KRfb, Skanlite, Haruna, Rust toolchain, JACK, `kfind`, KColorChooser and friends) are left out. Install them from Discover when you need them.)
 ```
-sudo dnf install -y gwenview spectacle ark kdegraphics-thumbnailers ffmpegthumbs kf6-kimageformats kio-extras dolphin-plugins plasma-systemmonitor plasma-print-manager kinfocenter plasma-disks ksshaskpass filelight okular kde-partitionmanager kclock python3-pip python3-virtualenv java-latest-openjdk-devel golang mesa-dri-drivers mesa-vulkan-drivers vulkan-tools libva libva-utils ffmpeg gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly gstreamer1-plugin-libav dav1d libheif libavif libjxl libwebp mpv pipewire-pulseaudio pipewire-alsa alsa-sof-firmware alsa-ucm alsa-utils bluez firefox qbittorrent libreoffice 7zip unzip xdg-user-dirs cups snapper python3-dnf-plugin-snapper btrfs-assistant btrfsmaintenance easyeffects lsp-plugins calf smartmontools nvme-cli earlyoom zram-generator flatpak fwupd nss-mdns irqbalance openssh rsync dosfstools mtools usbutils unrar yt-dlp zsh zsh-autosuggestions zsh-syntax-highlighting fzf bash-completion man-db man-pages fastfetch google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-emoji-fonts dejavu-sans-fonts fira-code-fonts```
+sudo dnf install -y gwenview spectacle ark kdegraphics-thumbnailers ffmpegthumbs kf6-kimageformats kio-extras dolphin-plugins plasma-systemmonitor plasma-print-manager kinfocenter plasma-disks ksshaskpass filelight okular kde-partitionmanager kclock python3-pip python3-virtualenv java-latest-openjdk-devel golang mesa-dri-drivers vulkan-tools libva libva-utils dav1d libheif libavif libjxl libwebp mpv pipewire-pulseaudio pipewire-alsa alsa-sof-firmware alsa-ucm alsa-utils bluez firefox qbittorrent libreoffice 7zip unzip xdg-user-dirs cups snapper python3-dnf-plugin-snapper btrfs-assistant btrfsmaintenance easyeffects lsp-plugins calf smartmontools nvme-cli earlyoom zram-generator flatpak fwupd nss-mdns irqbalance openssh rsync dosfstools mtools usbutils unrar yt-dlp zsh zsh-autosuggestions zsh-syntax-highlighting fzf bash-completion man-db man-pages fastfetch google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-emoji-fonts dejavu-sans-fonts fira-code-fonts
+```
 
 ## Battery charge limit (60%)
 
