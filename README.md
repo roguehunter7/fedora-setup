@@ -24,11 +24,11 @@ Run top to bottom. Each block is copy-paste into a terminal. Reboot where told. 
 ## Multimedia
 
 * Full ffmpeg instead of the stripped `ffmpeg-free`, plus the codec complements for GStreamer apps (straight from the [RPMFusion docs](https://rpmfusion.org/Howto/Multimedia)):
-* `sudo dnf swap ffmpeg-free ffmpeg --allowerasing`
+* `sudo dnf swap ffmpeg-free ffmpeg --allowerasing || sudo dnf install -y ffmpeg`
 * `sudo dnf install @multimedia --setopt="install_weak_deps=False" --exclude=PackageKit-gstreamer-plugin`
 * AMD hardware decode (H.264/H.265/VC-1 on this Vega 8 — stock Mesa leaves these out):
-* `sudo dnf install mesa-va-drivers-freeworld`
-* `sudo dnf swap mesa-vulkan-drivers mesa-vulkan-drivers-freeworld`
+* `sudo dnf swap mesa-va-drivers mesa-va-drivers-freeworld || sudo dnf install -y mesa-va-drivers-freeworld`
+* `sudo dnf swap mesa-vulkan-drivers mesa-vulkan-drivers-freeworld || sudo dnf install -y mesa-vulkan-drivers-freeworld`
 
 ## Firmware
 
@@ -48,8 +48,9 @@ Run top to bottom. Each block is copy-paste into a terminal. Reboot where told. 
 * Compilers and build tools as a group:
 * `sudo dnf group install -y development-tools`
 * This installs the extra apps. The spin already ships Plasma, KWin, Dolphin, Konsole, and PipeWire, so those are not listed. (`kio-zeroconf` has no Fedora build, so it is omitted. `nss-mdns` in the list below covers `.local` discovery (it pulls in Avahi itself). Niche extras from the old script (KRfb, Skanlite, Haruna, Rust toolchain, JACK, `kfind`, KColorChooser and friends) are left out. Install them from Discover when you need them.)
-```
-sudo dnf install -y gwenview spectacle ark kdegraphics-thumbnailers ffmpegthumbs kf6-kimageformats kio-extras dolphin-plugins plasma-systemmonitor plasma-print-manager kinfocenter plasma-disks ksshaskpass filelight okular kde-partitionmanager kclock python3-pip python3-virtualenv java-latest-openjdk-devel golang mesa-dri-drivers vulkan-tools libva libva-utils dav1d libheif libavif libjxl libwebp mpv pipewire-pulseaudio pipewire-alsa alsa-sof-firmware alsa-ucm alsa-utils bluez firefox qbittorrent libreoffice 7zip unzip xdg-user-dirs cups snapper python3-dnf-plugin-snapper btrfs-assistant btrfsmaintenance easyeffects lsp-plugins calf smartmontools nvme-cli earlyoom zram-generator flatpak fwupd nss-mdns irqbalance openssh rsync dosfstools mtools usbutils unrar yt-dlp zsh zsh-autosuggestions zsh-syntax-highlighting fzf bash-completion man-db man-pages fastfetch google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-emoji-fonts dejavu-sans-fonts fira-code-fonts
+
+```bash
+sudo dnf install -y gwenview spectacle ark kdegraphics-thumbnailers ffmpegthumbs kf6-kimageformats kio-extras dolphin-plugins plasma-systemmonitor plasma-print-manager kinfocenter plasma-disks ksshaskpass filelight okular kde-partitionmanager kclock python3-pip python3-virtualenv java-latest-openjdk-devel golang mesa-dri-drivers vulkan-tools libva libva-utils dav1d libheif libavif libjxl libwebp mpv pipewire-pulseaudio pipewire-alsa alsa-sof-firmware alsa-ucm alsa-utils bluez firefox qbittorrent libreoffice 7zip unzip xdg-user-dirs cups snapper python3-dnf-plugin-snapper btrfs-assistant btrfsmaintenance easyeffects lsp-plugins calf smartmontools nvme-cli earlyoom zram-generator flatpak fwupd nss-mdns openssh rsync dosfstools mtools usbutils unrar yt-dlp zsh zsh-autosuggestions zsh-syntax-highlighting fzf bash-completion man-db man-pages google-noto-sans-fonts google-noto-sans-cjk-fonts google-noto-emoji-fonts dejavu-sans-fonts fira-code-fonts
 ```
 
 ## Battery charge limit (60%)
@@ -66,7 +67,8 @@ sudo dnf install -y gwenview spectacle ark kdegraphics-thumbnailers ffmpegthumbs
 * `chsh -s $(command -v zsh)`
 * `curl -sS https://starship.rs/install.sh | sh -s -- -y`
 * Append this block to `~/.zshrc`. It is guarded, so re-running is safe:
-```
+
+```zsh
 # BEGIN SETUP BLOCKS
 export PATH="$HOME/.local/bin:$HOME/.local/share/fnm:$PATH"
 if command -v fnm >/dev/null 2>&1; then
@@ -129,18 +131,24 @@ bindkey '^[[F' end-of-line
 ## System tuning
 
 * Cap the journal at 200M:
-```
+
+```bash
 sudo mkdir -p /etc/systemd/journald.conf.d && printf '[Journal]\nSystemMaxUse=200M\nSystemMaxFiles=5\nSyncIntervalSec=5m\n' | sudo tee /etc/systemd/journald.conf.d/99-ssd.conf >/dev/null && sudo systemctl restart systemd-journald
 ```
+
 * 1:1 zstd zram (Fedora defaults to smaller lzo-rle zram; this replaces it):
-```
+
+```bash
 printf '[zram0]\nzram-size = ram\ncompression-algorithm = zstd\nswap-priority = 100\nfs-type = swap\n' | sudo tee /etc/systemd/zram-generator.conf >/dev/null && sudo systemctl daemon-reload && sudo systemctl start systemd-zram-setup@zram0.service
 ```
+
 * Kernel and memory sysctls (aggressive swap into zram, Proton map count, inotify capacity):
-```
+
+```bash
 sudo mkdir -p /etc/sysctl.d && printf 'vm.swappiness = 180\nvm.page-cluster = 0\nvm.watermark_boost_factor = 0\nvm.watermark_scale_factor = 125\nvm.max_map_count = 1048576\nvm.vfs_cache_pressure = 50\nfs.inotify.max_user_watches = 524288\nfs.inotify.max_user_instances = 8192\n' | sudo tee /etc/sysctl.d/99-performance.conf >/dev/null && sudo sysctl --system
 ```
-* earlyoom instead of systemd-oomd:
+
+* earlyoom instead of systemd-oomd (this guide sets `vm.swappiness=180`, which keeps zram full — and oomd kills at 90% swap used, so oomd would fire constantly while earlyoom picks better victims):
 * `printf 'EARLYOOM_ARGS="-m 5 -s 10 -r 60 --avoid '"'"'(^|/)(init|systemd|sddm|kwin_wayland|kwin|Xwayland|pipewire|wireplumber)$'"'"' --prefer '"'"'(^|/)(Web Content|firefox|chrome|electron)$'"'"'"\n' | sudo tee /etc/default/earlyoom >/dev/null && sudo systemctl disable --now systemd-oomd.service; sudo systemctl enable earlyoom.service`
 * SMART monitoring on every capable device:
 * `printf '# Scan every SMART-capable device\nDEVICESCAN -a\n' | sudo tee /etc/smartd.conf >/dev/null`
@@ -151,14 +159,15 @@ sudo mkdir -p /etc/sysctl.d && printf 'vm.swappiness = 180\nvm.page-cluster = 0\
 
 * Fedora ships `firewalld`. Use it and don't install `ufw` alongside it:
 * `sudo systemctl enable --now firewalld`
-* `sudo firewall-cmd --set-default-zone=public`
 
 ## DNS (Cloudflare DoT)
 
 * systemd-resolved on Cloudflare with opportunistic DNS-over-TLS:
-```
+
+```bash
 sudo mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com\nFallbackDNS=1.1.1.1 1.0.0.1\nDNSOverTLS=opportunistic\nDomains=~.\n' | sudo tee /etc/systemd/resolved.conf.d/99-dns.conf >/dev/null && sudo systemctl enable --now systemd-resolved && sudo rm -f /etc/resolv.conf && sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 ```
+
 * Point NetworkManager at resolved, then restart it:
 * `sudo mkdir -p /etc/NetworkManager/conf.d && printf '[main]\ndns=systemd-resolved\n' | sudo tee /etc/NetworkManager/conf.d/99-systemd-resolved.conf >/dev/null && sudo systemctl restart NetworkManager`
 * `nss-mdns` (in the install above) pulls in Avahi, so no action is needed.
@@ -170,8 +179,8 @@ sudo mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\nDNS=1.1.1.1#clo
 
 ## Btrfs
 
-* The installer already sets `compress=zstd:1` on `/` and `/home`. Add `noatime` to each Btrfs line in `/etc/fstab` (skips lines that already have it), then verify:
-* `grep -q 'noatime' /etc/fstab || sudo sed -i -E 's/^([^#][^ ]+ +\/[^ ]* +btrfs +)([^ ]+)/\1noatime,\2/' /etc/fstab`
+* The installer already sets `compress=zstd:1` on `/` and `/home`. Add `noatime` to Btrfs lines missing it (safe to re-run), then verify:
+* `sudo sed -i -E '/[[:space:]]btrfs[[:space:]]/ { /noatime/! s/(btrfs +)([^ ]+)/\1noatime,\2/; }' /etc/fstab`
 * `sudo findmnt --verify` (must pass before rebooting)
 * `fstrim.timer` (enabled below) stays for `/boot`, which is ext4. The Btrfs mounts discard async on their own.
 
@@ -199,12 +208,12 @@ sudo mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\nDNS=1.1.1.1#clo
 ## Services
 
 * Enable everything in one go:
-* `sudo systemctl enable plasmalogin.service NetworkManager.service systemd-resolved.service earlyoom.service firewalld.service bluetooth.service cups.socket fstrim.timer dnf-makecache.timer smartd.service snapper-timeline.timer snapper-cleanup.timer btrfs-scrub.timer avahi-daemon.service irqbalance.service fwupd-refresh.timer`
+* `sudo systemctl enable systemd-resolved.service earlyoom.service snapper-timeline.timer snapper-cleanup.timer btrfs-scrub.timer fwupd-refresh.timer` (the rest — display manager, NetworkManager, firewalld, Bluetooth, printing, trim, smartd, Avahi — ships enabled)
 * `sudo systemctl reboot`
 
 ## Verify after reboot
 
-```
+```console
 vainfo                  # VA-API on Vega 8
 vulkaninfo --summary    # RADV Vulkan
 zramctl                 # compressed swap
@@ -212,7 +221,7 @@ findmnt /               # Btrfs mount options
 resolvectl status       # DNS-over-TLS state
 firewall-cmd --state    # firewall running
 cat /sys/class/power_supply/BAT0/charge_control_end_threshold  # 60 = limit active
-snapper list            # pre/post snapshots
+sudo snapper list       # pre/post snapshots
 getenforce              # SELinux enforcing
 node -v                 # Node.js through fnm
 java --version          # latest OpenJDK SDK
